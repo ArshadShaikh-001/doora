@@ -69,7 +69,6 @@ fun HomeScreen(
 ) {
     val vm: HomeViewModel = viewModel(factory = HomeViewModel.Factory(repository))
     val tasks by vm.todayTasks.collectAsState()
-    val streakData by vm.streak.collectAsState()
 
     var taskPendingDelete by remember { mutableStateOf<TaskOccurrence?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -167,11 +166,10 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Calm, spacious header
+            // Calm, focused header
             HomeHeader(
                 greeting = greeting,
-                dateString = dateFormatted,
-                streakDays = streakData.currentStreak
+                dateString = dateFormatted
             )
 
             if (tasks.isEmpty()) {
@@ -206,51 +204,25 @@ fun HomeScreen(
 @Composable
 private fun HomeHeader(
     greeting: String,
-    dateString: String,
-    streakDays: Int
+    dateString: String
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 20.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 20.dp, vertical = 20.dp)
     ) {
-        Column {
-            Text(
-                text = greeting,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = dateString,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        // Streak indicator pill
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = Color(0x1DF79009),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x3DF79009))
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = "🔥", fontSize = 13.sp)
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "$streakDays ${if (streakDays == 1) "day" else "days"}",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFD97706)
-                )
-            }
-        }
+        Text(
+            text = greeting,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = dateString,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

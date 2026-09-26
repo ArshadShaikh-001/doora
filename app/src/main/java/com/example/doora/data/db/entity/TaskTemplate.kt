@@ -30,4 +30,9 @@ data class TaskTemplate(
     val createdAt: Long = System.currentTimeMillis(),
     /** Soft-delete flag; false means template recurrence is cancelled */
     val isActive: Boolean = true
-)
+) {
+    val streakStartDate: String
+        get() = if (startDate.isNotBlank()) startDate else {
+            java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(createdAt))
+        }
+}

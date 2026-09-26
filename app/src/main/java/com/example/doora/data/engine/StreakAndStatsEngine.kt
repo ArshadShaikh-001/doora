@@ -1,7 +1,10 @@
 package com.example.doora.data.engine
 
 import com.example.doora.data.db.entity.TaskOccurrence
+import com.example.doora.data.db.entity.TaskTemplate
 import com.example.doora.data.model.OccurrenceStatus
+import com.example.doora.data.model.Priority
+import com.example.doora.data.model.RecurrenceType
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -19,6 +22,28 @@ enum class StatsTimeRange(val label: String) {
 data class StreakData(
     val currentStreak: Int = 0,
     val longestStreak: Int = 0
+)
+
+data class DayStreakStatus(
+    val date: String,
+    val dayOfWeek: String,
+    val dayOfMonth: Int,
+    val status: OccurrenceStatus?
+)
+
+data class DailyTaskStreak(
+    val templateId: Long,
+    val title: String,
+    val color: Int,
+    val priority: Priority,
+    val streakStartDate: String,
+    val currentStreak: Int,
+    val longestStreak: Int,
+    val totalCompleted: Int,
+    val totalDaysEligible: Int,
+    val isCompletedToday: Boolean,
+    val history: Map<String, OccurrenceStatus> = emptyMap(),
+    val recentDays: List<DayStreakStatus> = emptyList()
 )
 
 data class StatisticsData(
@@ -41,6 +66,194 @@ data class StatisticsData(
 object StreakAndStatsEngine {
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+
+    /**
+     * Calculates the independent streak for a single Daily task template.
+     * Only DAILY recurrence type tasks participate in streaks.
+     * Dates before template.streakStartDate are NEVER evaluated and never treated as MISSED.
+     */
+    fun calculateDailyTaskStreak(
+        template: TaskTemplate,
+        occurrencesForTemplate: List<TaskOccurrence>,
+        todayDateStr: String
+    ): DailyTaskStreak {
+        if (template.recurrenceType != RecurrenceType.DAILY) {
+            return DailyTaskStreak(
+                templateId = template.id,
+                title = template.title,
+                color = template.color,
+                priority = template.priority,
+                streakStartDate = template.streakStartDate,
+                currentStreak = 0,
+                longestStreak = 0,
+                totalCompleted = 0,
+                totalDaysEligible = 0,
+                isCompletedToday = false
+            )
+        }
+
+        val streakStartDate = template.streakStartDate
+        // If the task start date is set in the future relative to today
+        if (streakStartDate > todayDateStr) {
+            return DailyTaskStreak(
+                templateId = template.id,
+                title = template.title,
+                color = template.color,
+                priority = template.priority,
+                streakStartDate = streakStartDate,
+                currentStreak = 0,
+                longestStreak = 0,
+                totalCompleted = 0,
+                totalDaysEligible = 0,
+                isCompletedToday = false
+            )
+        }
+
+        // Generate chronological date list strictly within [streakStartDate .. todayDateStr]
+        val dateList = mutableListOf<String>()
+        val cal = Calendar.getInstance().apply {
+            time = runCatching { dateFormat.parse(streakStartDate) }.getOrNull() ?: Date()
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val todayCal = Calendar.getInstance().apply {
+            time = runCatching { dateFormat.parse(todayDateStr) }.getOrNull() ?: Date()
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        while (!cal.after(todayCal)) {
+            dateList.add(dateFormat.format(cal.time))
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+
+        val occByDate = occurrencesForTemplate.groupBy { it.scheduledDate }
+        val historyMap = mutableMapOf<String, OccurrenceStatus>()
+
+        for (date in dateList) {
+            val occs = occByDate[date] ?: emptyList()
+            val status = when {
+                occs.any { it.status == OccurrenceStatus.COMPLETED } -> OccurrenceStatus.COMPLETED
+                occs.any { it.status == OccurrenceStatus.SKIPPED } -> OccurrenceStatus.SKIPPED
+                occs.any { it.status == OccurrenceStatus.MISSED } -> OccurrenceStatus.MISSED
+                occs.any { it.status == OccurrenceStatus.PENDING } -> {
+                    if (date < todayDateStr) OccurrenceStatus.MISSED else OccurrenceStatus.PENDING
+                }
+                else -> {
+                    if (date < todayDateStr) OccurrenceStatus.MISSED else OccurrenceStatus.PENDING
+                }
+            }
+            historyMap[date] = status
+        }
+
+        var runningStreak = 0
+        var longestStreak = 0
+
+        for (date in dateList) {
+            val dayStatus = historyMap[date] ?: OccurrenceStatus.MISSED
+            if (date == todayDateStr) {
+                if (dayStatus == OccurrenceStatus.COMPLETED) {
+                    val potential = runningStreak + 1
+                    if (potential > longestStreak) {
+                        longestStreak = potential
+                    }
+                }
+            } else {
+                // Past days strictly before today
+                when (dayStatus) {
+                    OccurrenceStatus.COMPLETED -> {
+                        runningStreak++
+                        if (runningStreak > longestStreak) {
+                            longestStreak = runningStreak
+                        }
+                    }
+                    OccurrenceStatus.SKIPPED -> {
+                        // SKIPPED interrupts the consecutive completed-day streak
+                        // It does NOT increment the streak, and consecutive run resets to 0
+                        runningStreak = 0
+                    }
+                    OccurrenceStatus.MISSED, OccurrenceStatus.PENDING -> {
+                        // MISSED breaks/resets current streak
+                        runningStreak = 0
+                    }
+                }
+            }
+        }
+
+        val todayStatus = historyMap[todayDateStr] ?: OccurrenceStatus.PENDING
+        val isCompletedToday = todayStatus == OccurrenceStatus.COMPLETED
+
+        val currentStreak = when (todayStatus) {
+            OccurrenceStatus.COMPLETED -> runningStreak + 1
+            OccurrenceStatus.PENDING -> runningStreak
+            OccurrenceStatus.SKIPPED -> 0
+            OccurrenceStatus.MISSED -> 0
+        }
+
+        if (currentStreak > longestStreak) {
+            longestStreak = currentStreak
+        }
+
+        val totalCompleted = historyMap.values.count { it == OccurrenceStatus.COMPLETED }
+        val totalDaysEligible = dateList.size
+
+        val dayFormat = SimpleDateFormat("EEE", Locale.US)
+        val dayOfMonthFormat = SimpleDateFormat("d", Locale.US)
+
+        val recentDays = dateList.takeLast(14).map { d ->
+            val parsed = runCatching { dateFormat.parse(d) }.getOrNull() ?: Date()
+            DayStreakStatus(
+                date = d,
+                dayOfWeek = dayFormat.format(parsed),
+                dayOfMonth = dayOfMonthFormat.format(parsed).toIntOrNull() ?: 1,
+                status = historyMap[d]
+            )
+        }
+
+        return DailyTaskStreak(
+            templateId = template.id,
+            title = template.title,
+            color = template.color,
+            priority = template.priority,
+            streakStartDate = streakStartDate,
+            currentStreak = currentStreak,
+            longestStreak = longestStreak,
+            totalCompleted = totalCompleted,
+            totalDaysEligible = totalDaysEligible,
+            isCompletedToday = isCompletedToday,
+            history = historyMap,
+            recentDays = recentDays
+        )
+    }
+
+    /**
+     * Calculates independent streaks for all active DAILY task templates.
+     */
+    fun calculateAllDailyStreaks(
+        dailyTemplates: List<TaskTemplate>,
+        allOccurrences: List<TaskOccurrence>,
+        todayDateStr: String
+    ): List<DailyTaskStreak> {
+        val occurrencesByTemplate = allOccurrences.groupBy { it.templateId }
+        return dailyTemplates
+            .filter { it.recurrenceType == RecurrenceType.DAILY && it.isActive }
+            .map { template ->
+                calculateDailyTaskStreak(
+                    template = template,
+                    occurrencesForTemplate = occurrencesByTemplate[template.id] ?: emptyList(),
+                    todayDateStr = todayDateStr
+                )
+            }
+            .sortedWith(
+                compareByDescending<DailyTaskStreak> { it.currentStreak }
+                    .thenByDescending { it.longestStreak }
+                    .thenBy { it.title.lowercase() }
+            )
+    }
 
     fun calculateStreak(occurrences: List<TaskOccurrence>, todayDateStr: String): StreakData {
         if (occurrences.isEmpty()) return StreakData(0, 0)

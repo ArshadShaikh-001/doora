@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,16 +30,24 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
+import com.example.doora.R
 import com.example.doora.data.repository.TaskRepository
 import com.example.doora.ui.addtask.AddEditTaskScreen
 import com.example.doora.ui.calendar.CalendarScreen
 import com.example.doora.ui.home.HomeScreen
 import com.example.doora.ui.statistics.StatisticsScreen
+import com.example.doora.ui.streaks.StreaksScreen
 
-sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object Home : Screen("home", "Tasks", Icons.Default.Home)
-    object Calendar : Screen("calendar", "Calendar", Icons.Default.DateRange)
-    object Statistics : Screen("statistics", "Insights", Icons.AutoMirrored.Filled.List)
+sealed class Screen(
+    val route: String,
+    val title: String,
+    val iconVector: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    val iconResId: Int? = null
+) {
+    object Home : Screen("home", "Tasks", iconVector = Icons.Default.Home)
+    object Calendar : Screen("calendar", "Calendar", iconVector = Icons.Default.DateRange)
+    object Statistics : Screen("statistics", "Insights", iconVector = Icons.AutoMirrored.Filled.List)
+    object Streaks : Screen("streaks", "Streaks", iconResId = R.drawable.ic_fire)
 }
 
 @Composable
@@ -49,7 +58,7 @@ fun DooraNavGraph(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val bottomNavScreens = listOf(Screen.Home, Screen.Calendar, Screen.Statistics)
+    val bottomNavScreens = listOf(Screen.Home, Screen.Calendar, Screen.Statistics, Screen.Streaks)
     val showBottomBar = currentRoute in bottomNavScreens.map { it.route }
 
     Scaffold(
@@ -74,7 +83,19 @@ fun DooraNavGraph(
                                     }
                                 }
                             },
-                            icon = { Icon(screen.icon, contentDescription = screen.title) },
+                            icon = {
+                                if (screen.iconResId != null) {
+                                    Icon(
+                                        painter = painterResource(id = screen.iconResId),
+                                        contentDescription = screen.title
+                                    )
+                                } else if (screen.iconVector != null) {
+                                    Icon(
+                                        imageVector = screen.iconVector,
+                                        contentDescription = screen.title
+                                    )
+                                }
+                            },
                             label = {
                                 Text(
                                     text = screen.title,
@@ -121,6 +142,13 @@ fun DooraNavGraph(
 
             composable(Screen.Statistics.route) {
                 StatisticsScreen(repository = repository)
+            }
+
+            composable(Screen.Streaks.route) {
+                StreaksScreen(
+                    repository = repository,
+                    onNavigateToAddTask = { navController.navigate("add_task") }
+                )
             }
 
             composable(

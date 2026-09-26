@@ -11,6 +11,7 @@ import com.example.doora.data.model.OccurrenceStatus
 import com.example.doora.data.model.Priority
 import com.example.doora.data.model.RecurrenceType
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,6 +48,17 @@ class TaskRepository(
 
     suspend fun getAllOccurrences(): List<TaskOccurrence> =
         occurrenceDao.getAllOccurrences()
+
+    fun observeActiveTemplates(): Flow<List<TaskTemplate>> =
+        templateDao.observeActiveTemplates()
+
+    fun observeActiveDailyTemplates(): Flow<List<TaskTemplate>> =
+        templateDao.observeActiveTemplates().map { templates ->
+            templates.filter { it.recurrenceType == RecurrenceType.DAILY }
+        }
+
+    suspend fun getActiveDailyTemplates(): List<TaskTemplate> =
+        templateDao.getActiveTemplates().filter { it.recurrenceType == RecurrenceType.DAILY }
 
     /**
      * Day boundary / Midnight Engine:
