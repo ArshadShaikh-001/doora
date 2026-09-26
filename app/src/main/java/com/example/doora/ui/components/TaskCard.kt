@@ -3,7 +3,7 @@ package com.example.doora.ui.components
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -52,14 +52,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.sin
 import com.example.doora.data.db.entity.TaskOccurrence
 import com.example.doora.data.model.OccurrenceStatus
 import com.example.doora.data.model.Priority
@@ -95,18 +110,6 @@ fun TaskCard(
 
     val taskColor = Color(occurrence.color)
 
-    // Overdue urgency pulse (800-1200ms cycle)
-    val infiniteTransition = rememberInfiniteTransition(label = "overduePulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "overduePulseAlpha"
-    )
-
     // Animated completion feedback
     val contentAlpha by animateFloatAsState(
         targetValue = if (isCompleted || isSkipped) 0.55f else 1.0f,
@@ -117,12 +120,20 @@ fun TaskCard(
     val surfaceBg = if (isCompleted) com.example.doora.ui.theme.LuxuryCompletedCardSurface else com.example.doora.ui.theme.LuxuryCardSurface
     val borderStroke = when {
         isCompleted -> BorderStroke(1.dp, com.example.doora.ui.theme.GoldBorderSubdued)
-        isEffectivelyOverdue -> BorderStroke(1.2.dp, taskColor.copy(alpha = 0.25f + 0.45f * pulseAlpha))
         else -> BorderStroke(1.dp, com.example.doora.ui.theme.GoldBorder)
     }
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .travelingBorderHighlight(
+                enabled = isEffectivelyOverdue,
+                color = taskColor,
+                cornerRadius = 22.dp,
+                strokeWidth = 1.3.dp,
+                highlightLength = 80.dp,
+                durationMillis = 2400
+            ),
         shape = RoundedCornerShape(22.dp),
         color = surfaceBg,
         border = borderStroke,
@@ -134,18 +145,15 @@ fun TaskCard(
                 .padding(start = 16.dp, end = 12.dp, top = 16.dp, bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Task Unique Color Accent Pill (pulses if overdue)
+            // Task Unique Color Accent Pill
             Box(
                 modifier = Modifier
                     .width(4.dp)
                     .height(30.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(
-                        when {
-                            isCompleted || isSkipped -> taskColor.copy(alpha = 0.45f)
-                            isEffectivelyOverdue -> taskColor.copy(alpha = pulseAlpha)
-                            else -> taskColor
-                        }
+                        if (isCompleted || isSkipped) taskColor.copy(alpha = 0.45f)
+                        else taskColor
                     )
             )
 
@@ -205,14 +213,14 @@ fun TaskCard(
                     } else if (isEffectivelyOverdue) {
                         Surface(
                             shape = RoundedCornerShape(7.dp),
-                            color = taskColor.copy(alpha = 0.16f * pulseAlpha)
+                            color = taskColor.copy(alpha = 0.16f)
                         ) {
                             Text(
                                 text = "Overdue",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = taskColor.copy(alpha = 0.45f + 0.55f * pulseAlpha),
+                                color = taskColor.copy(alpha = 0.9f),
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
                         }
@@ -224,7 +232,6 @@ fun TaskCard(
             if (isPending) {
                 ModernCompletionButton(
                     color = taskColor,
-                    pulseAlpha = if (isEffectivelyOverdue) pulseAlpha else 1.0f,
                     isCompleted = justCompletedLocally,
                     onClick = {
                         justCompletedLocally = true
@@ -316,7 +323,6 @@ fun TaskCard(
 @Composable
 private fun ModernCompletionButton(
     color: Color,
-    pulseAlpha: Float = 1.0f,
     isCompleted: Boolean,
     onClick: () -> Unit
 ) {
@@ -360,7 +366,7 @@ private fun ModernCompletionButton(
                 .size(28.dp)
                 .clip(CircleShape)
                 .background(fillColor)
-                .border(2.dp, color.copy(alpha = pulseAlpha), CircleShape),
+                .border(2.dp, color, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             if (checkScale > 0.05f) {
@@ -435,4 +441,145 @@ fun formatTime(minutes: Int): String {
     }
     return "%d:%02d %s".format(h12, m, amPm)
 }
+
+/**
+ * Premium traveling light highlight around the card's rounded outer border.
+ * Continuously loops: top-left -> top -> right -> bottom -> left -> back around.
+ * Automatically active only when enabled = true (overdue and pending), and terminates
+ * immediately upon completion, skip, delete, or rollover to MISSED status.
+ */
+@Composable
+fun Modifier.travelingBorderHighlight(
+    enabled: Boolean,
+    color: Color,
+    cornerRadius: Dp = 22.dp,
+    strokeWidth: Dp = 1.3.dp,
+    highlightLength: Dp = 80.dp,
+    durationMillis: Int = 2400
+): Modifier {
+    if (!enabled) return this
+
+    val infiniteTransition = rememberInfiniteTransition(label = "travelingBorderHighlight")
+    val progress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = durationMillis, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "highlightProgress"
+    )
+
+    return this.drawWithCache {
+        val strokeWidthPx = strokeWidth.toPx()
+        val halfStroke = strokeWidthPx / 2f
+        val cornerRadiusPx = (cornerRadius.toPx() - halfStroke).coerceAtLeast(0f)
+
+        val borderPath = Path().apply {
+            addRoundRect(
+                RoundRect(
+                    rect = Rect(
+                        offset = Offset(halfStroke, halfStroke),
+                        size = Size(size.width - strokeWidthPx, size.height - strokeWidthPx)
+                    ),
+                    cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx)
+                )
+            )
+        }
+
+        val pathMeasure = PathMeasure().apply {
+            setPath(borderPath, forceClosed = true)
+        }
+        val perimeter = pathMeasure.length
+
+        val beamLengthPx = minOf(highlightLength.toPx(), perimeter * 0.25f)
+        val numSegments = 12
+        val segLen = beamLengthPx / numSegments
+        val scratchPath = Path()
+
+        onDrawWithContent {
+            // 1. Draw card content and existing normal border first
+            drawContent()
+
+            // 2. Draw subtle traveling light highlight along the border
+            if (perimeter > 0f) {
+                val centerDist = progress * perimeter
+                val beamStart = centerDist - beamLengthPx / 2f
+
+                for (i in 0 until numSegments) {
+                    val s1 = beamStart + i * segLen
+                    val s2 = beamStart + (i + 1) * segLen
+
+                    val t = (i + 0.5f) / numSegments
+                    val sinVal = sin(t * PI.toFloat())
+                    val alpha = (sinVal * sinVal) * 0.95f
+
+                    drawBeamSegment(
+                        drawScope = this,
+                        pathMeasure = pathMeasure,
+                        scratchPath = scratchPath,
+                        startDist = s1,
+                        stopDist = s2,
+                        perimeter = perimeter,
+                        color = color.copy(alpha = alpha),
+                        strokeWidth = strokeWidthPx
+                    )
+
+                    // Core bright sheen at the center of the highlight
+                    if (sinVal > 0.75f) {
+                        val coreAlpha = ((sinVal - 0.75f) / 0.25f) * 0.45f
+                        drawBeamSegment(
+                            drawScope = this,
+                            pathMeasure = pathMeasure,
+                            scratchPath = scratchPath,
+                            startDist = s1,
+                            stopDist = s2,
+                            perimeter = perimeter,
+                            color = Color.White.copy(alpha = coreAlpha),
+                            strokeWidth = strokeWidthPx * 0.75f
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun drawBeamSegment(
+    drawScope: ContentDrawScope,
+    pathMeasure: PathMeasure,
+    scratchPath: Path,
+    startDist: Float,
+    stopDist: Float,
+    perimeter: Float,
+    color: Color,
+    strokeWidth: Float
+) {
+    if (perimeter <= 0f) return
+    val len = stopDist - startDist
+    if (len <= 0f) return
+
+    val s1 = (startDist % perimeter + perimeter) % perimeter
+    val s2 = s1 + len
+
+    if (s2 <= perimeter) {
+        scratchPath.reset()
+        pathMeasure.getSegment(s1, s2, scratchPath, true)
+        drawScope.drawPath(
+            path = scratchPath,
+            color = color,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt, join = StrokeJoin.Round)
+        )
+    } else {
+        scratchPath.reset()
+        pathMeasure.getSegment(s1, perimeter, scratchPath, true)
+        pathMeasure.getSegment(0f, s2 - perimeter, scratchPath, true)
+        drawScope.drawPath(
+            path = scratchPath,
+            color = color,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt, join = StrokeJoin.Round)
+        )
+    }
+}
+
 
