@@ -1,8 +1,17 @@
 package com.example.doora.ui.calendar
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -20,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,11 +39,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,46 +68,70 @@ fun CalendarScreen(
     val state by vm.state.collectAsState()
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Calendar", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        }
+        containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Month navigation header
+            // Month Header with Animated Month Navigation
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = vm::prevMonth) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous Month")
+                Column {
+                    Text(
+                        text = "Calendar",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = state.monthTitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                Text(
-                    text = state.monthTitle,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                IconButton(onClick = vm::nextMonth) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next Month")
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(
+                        onClick = vm::prevMonth,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Previous Month",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = vm::nextMonth,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Next Month",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
-            // Days of Week Header (Mon .. Sun)
+            // Days of Week labels (M, T, W, T, F, S, S)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
                 listOf("M", "T", "W", "T", "F", "S", "S").forEach { day ->
@@ -103,76 +139,108 @@ fun CalendarScreen(
                         text = day,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center
                     )
                 }
             }
 
-            // Calendar Month Grid (6 rows of 7 days)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-            ) {
-                val weeks = state.daysInMonth.chunked(7)
-                weeks.forEach { week ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        week.forEach { day ->
-                            CalendarDayCell(
-                                day = day,
-                                isSelected = day.dateStr == state.selectedDate,
-                                onClick = { vm.selectDate(day.dateStr) },
-                                modifier = Modifier.weight(1f)
-                            )
+            // Animated Month Grid Transition
+            AnimatedContent(
+                targetState = state.yearMonthString,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        (slideInHorizontally { width -> width / 2 } + fadeIn()).togetherWith(
+                            slideOutHorizontally { width -> -width / 2 } + fadeOut()
+                        )
+                    } else {
+                        (slideInHorizontally { width -> -width / 2 } + fadeIn()).togetherWith(
+                            slideOutHorizontally { width -> width / 2 } + fadeOut()
+                        )
+                    }
+                },
+                label = "monthTransition"
+            ) { _ ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                ) {
+                    val weeks = state.daysInMonth.chunked(7)
+                    weeks.forEach { week ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceAround
+                        ) {
+                            week.forEach { day ->
+                                ModernCalendarDayCell(
+                                    day = day,
+                                    isSelected = day.dateStr == state.selectedDate,
+                                    onClick = { vm.selectDate(day.dateStr) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
 
-            // Selected date header & tasks
-            Text(
-                text = "Tasks for ${state.selectedDate}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-            )
+            // Selected Date Tasks Section
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = state.selectedDate,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
 
-            if (state.selectedDateTasks.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 ) {
                     Text(
-                        text = "No tasks on this date",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "${state.selectedDateTasks.size} ${if (state.selectedDateTasks.size == 1) "task" else "tasks"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
+            }
+
+            // Task list for selected date
+            if (state.selectedDateTasks.isEmpty()) {
+                CalendarEmptyState()
             } else {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(state.selectedDateTasks, key = { it.id }) { occ ->
-                        TaskCard(
-                            occurrence = occ,
-                            onComplete = { vm.completeTask(occ) },
-                            onSkip = { vm.skipTask(occ) },
-                            onEdit = { onEditTask(occ.id) },
-                            onDelete = {}
-                        )
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = fadeIn() + slideInVertically { it / 3 },
+                            exit = fadeOut()
+                        ) {
+                            TaskCard(
+                                occurrence = occ,
+                                onComplete = { vm.completeTask(occ) },
+                                onSkip = { vm.skipTask(occ) },
+                                onEdit = { onEditTask(occ.id) },
+                                onDelete = {}
+                            )
+                        }
                     }
                     item { Spacer(Modifier.height(80.dp)) }
                 }
@@ -182,18 +250,14 @@ fun CalendarScreen(
 }
 
 @Composable
-private fun CalendarDayCell(
+private fun ModernCalendarDayCell(
     day: CalendarDay,
     isSelected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cellBg = if (isSelected) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-    } else Color.Transparent
-
     val textColor = when {
-        !day.isCurrentMonth -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+        !day.isCurrentMonth -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
         day.isToday -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurface
     }
@@ -201,46 +265,51 @@ private fun CalendarDayCell(
     Column(
         modifier = modifier
             .aspectRatio(1f)
-            .padding(2.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(cellBg)
+            .padding(2.5.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                else Color.Transparent
+            )
             .then(
-                if (day.isToday) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                else if (isSelected) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                if (isSelected) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                else if (day.isToday) Modifier.border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                 else Modifier
             )
-            .clickable(onClick = onClick)
-            .padding(2.dp),
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = ripple(bounded = true),
+                onClick = onClick
+            )
+            .padding(horizontal = 2.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = day.dayNumber.toString(),
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             fontWeight = if (day.isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
             color = textColor
         )
 
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(3.dp))
 
-        // Horizontal colored task segments
-        // Requirement 6:
-        // COMPLETED -> colored segment
-        // PENDING/MISSED -> grey segment
-        // SKIPPED -> visually distinct subtle segment
+        // Heatmap Task Segment Bars
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
             verticalArrangement = Arrangement.spacedBy(1.5.dp)
         ) {
             val displayTasks = day.tasks.take(3)
             displayTasks.forEach { task ->
-                TaskSegmentBar(occurrence = task)
+                HeatmapTaskSegment(occurrence = task)
             }
             if (day.tasks.size > 3) {
                 Text(
                     text = "+${day.tasks.size - 3}",
-                    fontSize = 8.sp,
+                    fontSize = 7.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 8.sp
+                    lineHeight = 7.5.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -248,7 +317,7 @@ private fun CalendarDayCell(
 }
 
 @Composable
-private fun TaskSegmentBar(occurrence: TaskOccurrence) {
+private fun HeatmapTaskSegment(occurrence: TaskOccurrence) {
     val taskColor = Color(occurrence.color)
     when (occurrence.status) {
         OccurrenceStatus.COMPLETED -> {
@@ -266,7 +335,7 @@ private fun TaskSegmentBar(occurrence: TaskOccurrence) {
                     .fillMaxWidth()
                     .height(3.dp)
                     .clip(RoundedCornerShape(1.5.dp))
-                    .background(Color(0xFF9E9E9E)) // Grey segment
+                    .background(Color(0xFF9E9E9E).copy(alpha = 0.6f))
             )
         }
         OccurrenceStatus.SKIPPED -> {
@@ -275,8 +344,48 @@ private fun TaskSegmentBar(occurrence: TaskOccurrence) {
                     .fillMaxWidth()
                     .height(3.dp)
                     .clip(RoundedCornerShape(1.5.dp))
-                    .background(taskColor.copy(alpha = 0.25f))
-                    .border(0.5.dp, taskColor.copy(alpha = 0.6f), RoundedCornerShape(1.5.dp))
+                    .background(taskColor.copy(alpha = 0.2f))
+                    .border(0.6.dp, taskColor.copy(alpha = 0.6f), RoundedCornerShape(1.5.dp))
+            )
+        }
+    }
+}
+
+@Composable
+private fun CalendarEmptyState() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 40.dp, bottom = 40.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DateRange,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = "No tasks on this date",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Enjoy your free time or schedule ahead.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
     }
