@@ -16,8 +16,10 @@ class HomeViewModel(private val repository: TaskRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
     init {
-        // Generate today's occurrence for any active DAILY templates that lack one.
-        viewModelScope.launch { repository.ensureTodayOccurrences() }
+        // Run day boundary rollover and generate today's occurrences
+        viewModelScope.launch {
+            repository.ensureTodayOccurrences()
+        }
     }
 
     fun completeTask(occurrence: TaskOccurrence) {
@@ -28,8 +30,12 @@ class HomeViewModel(private val repository: TaskRepository) : ViewModel() {
         viewModelScope.launch { repository.skipOccurrence(occurrence.id) }
     }
 
-    fun deleteTask(occurrence: TaskOccurrence) {
-        viewModelScope.launch { repository.deleteTask(occurrence) }
+    fun deleteOccurrenceOnly(occurrence: TaskOccurrence) {
+        viewModelScope.launch { repository.deleteOccurrence(occurrence) }
+    }
+
+    fun deleteRecurring(occurrence: TaskOccurrence) {
+        viewModelScope.launch { repository.deleteRecurringTemplate(occurrence.templateId) }
     }
 
     class Factory(private val repo: TaskRepository) : ViewModelProvider.Factory {

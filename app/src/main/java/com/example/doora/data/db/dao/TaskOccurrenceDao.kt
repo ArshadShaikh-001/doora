@@ -12,10 +12,6 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TaskOccurrenceDao {
 
-    /**
-     * Returns today's occurrences sorted by priority (HIGH first) then by scheduled time.
-     * The CASE expression maps the enum string to a sort integer.
-     */
     @Query(
         """
         SELECT * FROM task_occurrences
@@ -28,17 +24,41 @@ interface TaskOccurrenceDao {
     fun observeForDate(date: String): Flow<List<TaskOccurrence>>
 
     @Query(
-        "SELECT * FROM task_occurrences WHERE templateId = :templateId AND scheduledDate = :date LIMIT 1"
+        """
+        SELECT * FROM task_occurrences
+        WHERE scheduledDate >= :startDate AND scheduledDate <= :endDate
+        ORDER BY scheduledDate ASC, scheduledTimeMinutes ASC
+        """
     )
+    fun observeForDateRange(startDate: String, endDate: String): Flow<List<TaskOccurrence>>
+
+    @Query(
+        """
+        SELECT * FROM task_occurrences
+        WHERE scheduledDate >= :startDate AND scheduledDate <= :endDate
+        ORDER BY scheduledDate ASC, scheduledTimeMinutes ASC
+        """
+    )
+    suspend fun getForDateRange(startDate: String, endDate: String): List<TaskOccurrence>
+
+    @Query("SELECT * FROM task_occurrences ORDER BY scheduledDate ASC, scheduledTimeMinutes ASC")
+    fun observeAllOccurrences(): Flow<List<TaskOccurrence>>
+
+    @Query("SELECT * FROM task_occurrences ORDER BY scheduledDate ASC, scheduledTimeMinutes ASC")
+    suspend fun getAllOccurrences(): List<TaskOccurrence>
+
+    @Query("SELECT * FROM task_occurrences WHERE status = 'PENDING'")
+    suspend fun getAllPendingOccurrences(): List<TaskOccurrence>
+
+    @Query("SELECT * FROM task_occurrences WHERE scheduledDate < :todayDate AND status = 'PENDING'")
+    suspend fun getPastPendingOccurrences(todayDate: String): List<TaskOccurrence>
+
+    @Query("SELECT * FROM task_occurrences WHERE templateId = :templateId AND scheduledDate = :date LIMIT 1")
     suspend fun findByTemplateAndDate(templateId: Long, date: String): TaskOccurrence?
 
     @Query("SELECT * FROM task_occurrences WHERE id = :id")
     suspend fun findById(id: Long): TaskOccurrence?
 
-    /**
-     * Returns an existing occurrence that would conflict with the given (date, time) slot.
-     * [excludeId] = -1 means exclude nothing (add mode); pass a real id to skip it (edit mode).
-     */
     @Query(
         """
         SELECT * FROM task_occurrences
@@ -59,6 +79,12 @@ interface TaskOccurrenceDao {
     @Query("UPDATE task_occurrences SET status = :status, completedAt = :completedAt WHERE id = :id")
     suspend fun updateStatus(id: Long, status: OccurrenceStatus, completedAt: Long?)
 
+    @Query("UPDATE task_occurrences SET snoozedUntilMillis = :snoozedUntilMillis WHERE id = :id")
+    suspend fun updateSnooze(id: Long, snoozedUntilMillis: Long?)
+
     @Query("DELETE FROM task_occurrences WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM task_occurrences WHERE templateId = :templateId AND scheduledDate >= :fromDate AND status = 'PENDING'")
+    suspend fun deleteFuturePendingOccurrences(templateId: Long, fromDate: String)
 }

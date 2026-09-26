@@ -6,9 +6,8 @@ import com.example.doora.data.model.Priority
 import com.example.doora.data.model.RecurrenceType
 
 /**
- * Defines the task (its title, schedule, colour, etc.).
- * For a ONE_TIME task there is exactly one TaskOccurrence.
- * For a DAILY task a new TaskOccurrence is generated each day.
+ * Defines the recurring or one-time task definition.
+ * TaskOccurrence represents a task on a specific calendar date.
  */
 @Entity(tableName = "task_templates")
 data class TaskTemplate(
@@ -20,7 +19,15 @@ data class TaskTemplate(
     val recurrenceType: RecurrenceType,
     /** Minutes since midnight (0–1439) */
     val scheduledTimeMinutes: Int,
+    /** Start date in "yyyy-MM-dd" format */
+    val startDate: String = "",
+    /** Comma-separated day numbers (1=Monday ... 7=Sunday) for SPECIFIC_WEEKDAYS */
+    val weekdays: String = "",
+    /** Day of month (1..31) for MONTHLY */
+    val dayOfMonth: Int = 1,
+    /** Comma-separated dates "yyyy-MM-dd,yyyy-MM-dd" for SPECIFIC_DATES */
+    val specificDates: String = "",
     val createdAt: Long = System.currentTimeMillis(),
-    /** Soft-delete flag; false means the template (and recurrence) is cancelled */
+    /** Soft-delete flag; false means template recurrence is cancelled */
     val isActive: Boolean = true
 )

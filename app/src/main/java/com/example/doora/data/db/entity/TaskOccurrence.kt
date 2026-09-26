@@ -8,12 +8,8 @@ import com.example.doora.data.model.OccurrenceStatus
 import com.example.doora.data.model.Priority
 
 /**
- * Represents a task on a specific calendar date.
- * Fields (title, priority, color) are snapshotted from the template so that
- * historical occurrences are not affected by future edits.
- *
- * Unique constraint on (scheduledDate, scheduledTimeMinutes) prevents two tasks
- * from occupying the same slot on the same day.
+ * Represents a task occurrence on a specific calendar date.
+ * Fields are snapshotted from the template to preserve historical data.
  */
 @Entity(
     tableName = "task_occurrences",
@@ -45,5 +41,7 @@ data class TaskOccurrence(
     val scheduledTimeMinutes: Int,
     val status: OccurrenceStatus = OccurrenceStatus.PENDING,
     /** Epoch millis; non-null only when status == COMPLETED */
-    val completedAt: Long? = null
+    val completedAt: Long? = null,
+    /** Epoch millis; set when snoozed, clears when dismissed/fired */
+    val snoozedUntilMillis: Long? = null
 )

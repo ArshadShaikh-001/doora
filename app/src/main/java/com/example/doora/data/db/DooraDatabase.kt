@@ -10,7 +10,7 @@ import com.example.doora.data.db.entity.TaskTemplate
 
 @Database(
     entities = [TaskTemplate::class, TaskOccurrence::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

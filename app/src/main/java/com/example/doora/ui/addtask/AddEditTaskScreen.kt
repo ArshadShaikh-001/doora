@@ -5,6 +5,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -51,11 +55,12 @@ import com.example.doora.data.repository.TaskRepository
 import com.example.doora.ui.components.ColorPicker
 import com.example.doora.ui.components.formatTime
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddEditTaskScreen(
     repository: TaskRepository,
@@ -75,6 +80,7 @@ fun AddEditTaskScreen(
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
+    var showSpecificDatePicker by remember { mutableStateOf(false) }
 
     // ---- Date Picker dialog ----
     if (showDatePicker) {
@@ -91,6 +97,25 @@ fun AddEditTaskScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            DatePicker(state = dpState)
+        }
+    }
+
+    // Specific Date Picker dialog for SPECIFIC_DATES
+    if (showSpecificDatePicker) {
+        val dpState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showSpecificDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    dpState.selectedDateMillis?.let { vm.addSpecificDate(utcMillisToDateString(it)) }
+                    showSpecificDatePicker = false
+                }) { Text("Add") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSpecificDatePicker = false }) { Text("Cancel") }
             }
         ) {
             DatePicker(state = dpState)
@@ -142,6 +167,36 @@ fun AddEditTaskScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
+            // ---- Recurring Edit Scope Choice ("Only today" vs "Repeat") ----
+            if (state.isEditMode && state.isRecurringTask) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Apply Changes To:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = state.editScope == EditScope.ONLY_TODAY,
+                                onClick = { vm.updateEditScope(EditScope.ONLY_TODAY) },
+                                label = { Text("Only today") }
+                            )
+                            FilterChip(
+                                selected = state.editScope == EditScope.REPEAT,
+                                onClick = { vm.updateEditScope(EditScope.REPEAT) },
+                                label = { Text("Repeat") }
+                            )
+                        }
+                    }
+                }
+            }
+
             // ---- Title ----
             OutlinedTextField(
                 value = state.title,
@@ -152,15 +207,17 @@ fun AddEditTaskScreen(
                 isError = state.error?.contains("Title", ignoreCase = true) == true
             )
 
-            // ---- Date field (tap to open picker) ----
-            ClickableTextField(
-                value = formatDisplayDate(state.date),
-                label = "Date",
-                icon = { Icon(Icons.Default.DateRange, contentDescription = null) },
-                onClick = { showDatePicker = true }
-            )
+            // ---- Date (Only shown in Add mode or when editing One-time) ----
+            if (!state.isEditMode || (!state.isRecurringTask)) {
+                ClickableTextField(
+                    value = formatDisplayDate(state.date),
+                    label = "Date",
+                    icon = { Icon(Icons.Default.DateRange, contentDescription = null) },
+                    onClick = { showDatePicker = true }
+                )
+            }
 
-            // ---- Time field (tap to open picker) ----
+            // ---- Time ----
             ClickableTextField(
                 value = formatTime(state.timeMinutes),
                 label = "Time",
@@ -185,12 +242,15 @@ fun AddEditTaskScreen(
                 }
             }
 
-            // ---- Recurrence (add mode only) ----
-            if (!state.isEditMode) {
+            // ---- Recurrence Options ----
+            if (!state.isEditMode || (state.isRecurringTask && state.editScope == EditScope.REPEAT)) {
                 Column {
                     Text("Repeat", style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         FilterChip(
                             selected = state.recurrenceType == RecurrenceType.ONE_TIME,
                             onClick = { vm.updateRecurrence(RecurrenceType.ONE_TIME) },
@@ -199,8 +259,101 @@ fun AddEditTaskScreen(
                         FilterChip(
                             selected = state.recurrenceType == RecurrenceType.DAILY,
                             onClick = { vm.updateRecurrence(RecurrenceType.DAILY) },
-                            label = { Text("Daily") }
+                            label = { Text("Every day") }
                         )
+                        FilterChip(
+                            selected = state.recurrenceType == RecurrenceType.WEEKDAYS,
+                            onClick = { vm.updateRecurrence(RecurrenceType.WEEKDAYS) },
+                            label = { Text("Mon–Fri") }
+                        )
+                        FilterChip(
+                            selected = state.recurrenceType == RecurrenceType.SPECIFIC_WEEKDAYS,
+                            onClick = { vm.updateRecurrence(RecurrenceType.SPECIFIC_WEEKDAYS) },
+                            label = { Text("Specific days") }
+                        )
+                        FilterChip(
+                            selected = state.recurrenceType == RecurrenceType.WEEKLY,
+                            onClick = { vm.updateRecurrence(RecurrenceType.WEEKLY) },
+                            label = { Text("Weekly") }
+                        )
+                        FilterChip(
+                            selected = state.recurrenceType == RecurrenceType.MONTHLY,
+                            onClick = { vm.updateRecurrence(RecurrenceType.MONTHLY) },
+                            label = { Text("Monthly") }
+                        )
+                        FilterChip(
+                            selected = state.recurrenceType == RecurrenceType.SPECIFIC_DATES,
+                            onClick = { vm.updateRecurrence(RecurrenceType.SPECIFIC_DATES) },
+                            label = { Text("Specific dates") }
+                        )
+                    }
+
+                    // Extra controls for SPECIFIC_WEEKDAYS
+                    if (state.recurrenceType == RecurrenceType.SPECIFIC_WEEKDAYS) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("Select Days:", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(6.dp))
+                        val days = listOf(
+                            Calendar.MONDAY to "Mon",
+                            Calendar.TUESDAY to "Tue",
+                            Calendar.WEDNESDAY to "Wed",
+                            Calendar.THURSDAY to "Thu",
+                            Calendar.FRIDAY to "Fri",
+                            Calendar.SATURDAY to "Sat",
+                            Calendar.SUNDAY to "Sun"
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            days.forEach { (calDay, label) ->
+                                FilterChip(
+                                    selected = calDay in state.selectedWeekdays,
+                                    onClick = { vm.toggleWeekday(calDay) },
+                                    label = { Text(label) }
+                                )
+                            }
+                        }
+                    }
+
+                    // Extra controls for MONTHLY
+                    if (state.recurrenceType == RecurrenceType.MONTHLY) {
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = state.dayOfMonth.toString(),
+                            onValueChange = { str ->
+                                str.toIntOrNull()?.let { vm.updateDayOfMonth(it) }
+                            },
+                            label = { Text("Day of Month (1–31)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // Extra controls for SPECIFIC_DATES
+                    if (state.recurrenceType == RecurrenceType.SPECIFIC_DATES) {
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Dates (${state.specificDates.size}):", style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { showSpecificDatePicker = true }) {
+                                Text("+ Add Date")
+                            }
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            state.specificDates.forEach { d ->
+                                FilterChip(
+                                    selected = true,
+                                    onClick = { vm.removeSpecificDate(d) },
+                                    label = { Text("$d ✕") }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -229,7 +382,10 @@ fun AddEditTaskScreen(
             // ---- Save button ----
             Button(
                 onClick = vm::save,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = RoundedCornerShape(12.dp),
                 enabled = !state.isLoading
             ) {
                 if (state.isLoading) {
@@ -239,19 +395,21 @@ fun AddEditTaskScreen(
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                 } else {
-                    Text(if (state.isEditMode) "Save Changes" else "Add Task")
+                    Text(
+                        text = if (state.isEditMode) {
+                            if (state.isRecurringTask && state.editScope == EditScope.ONLY_TODAY) "Save for Today"
+                            else "Save Changes"
+                        } else "Add Task",
+                        style = MaterialTheme.typography.titleMedium
+                    )
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
 
-/**
- * A read-only OutlinedTextField that looks normal but fires [onClick] on tap.
- * An invisible overlay captures the click so the soft keyboard never opens.
- */
 @Composable
 private fun ClickableTextField(
     value: String,
@@ -268,7 +426,6 @@ private fun ClickableTextField(
             readOnly = true,
             trailingIcon = icon
         )
-        // Transparent overlay to capture the tap (TextField absorbs touch by default)
         Spacer(
             modifier = Modifier
                 .matchParentSize()
@@ -280,10 +437,6 @@ private fun ClickableTextField(
         )
     }
 }
-
-// ---------------------------------------------------------------------------
-// Date helpers (UTC-based to match DatePicker's internal epoch representation)
-// ---------------------------------------------------------------------------
 
 private fun dateStringToUtcMillis(dateStr: String): Long {
     return try {
