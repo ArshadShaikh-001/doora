@@ -11,8 +11,18 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.navigation.compose.rememberNavController
 import com.example.doora.ui.navigation.DooraNavGraph
+import com.example.doora.ui.splash.CosmicSplashScreen
 import com.example.doora.ui.theme.DooraTheme
 
 class MainActivity : ComponentActivity() {
@@ -42,8 +52,24 @@ class MainActivity : ComponentActivity() {
         val repository = (application as DooraApplication).repository
         setContent {
             DooraTheme {
-                val navController = rememberNavController()
-                DooraNavGraph(navController = navController, repository = repository)
+                var isSplashActive by rememberSaveable { mutableStateOf(true) }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF020305))
+                ) {
+                    val navController = rememberNavController()
+                    DooraNavGraph(navController = navController, repository = repository)
+
+                    if (isSplashActive) {
+                        CosmicSplashScreen(
+                            onSplashFinished = {
+                                isSplashActive = false
+                            }
+                        )
+                    }
+                }
             }
         }
     }
