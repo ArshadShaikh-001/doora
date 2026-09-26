@@ -5,10 +5,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -50,23 +50,27 @@ fun ColorPicker(
     onColorSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(7),
+    Column(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        userScrollEnabled = false
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        items(TASK_COLOR_PALETTE) { colorInt ->
-            val isSelected = colorInt == selectedColor
-            // A colour is "in use" only when another task owns it
-            val isUnavailable = colorInt in usedColors && !isSelected
-            ColorSwatch(
-                colorInt = colorInt,
-                isSelected = isSelected,
-                isUnavailable = isUnavailable,
-                onClick = { if (!isUnavailable) onColorSelected(colorInt) }
-            )
+        val rows = TASK_COLOR_PALETTE.chunked(7)
+        for (row in rows) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                for (colorInt in row) {
+                    val isSelected = colorInt == selectedColor
+                    val isUnavailable = colorInt in usedColors && !isSelected
+                    ColorSwatch(
+                        colorInt = colorInt,
+                        isSelected = isSelected,
+                        isUnavailable = isUnavailable,
+                        onClick = { if (!isUnavailable) onColorSelected(colorInt) }
+                    )
+                }
+            }
         }
     }
 }
