@@ -33,6 +33,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.example.doora.R
+import com.example.doora.data.model.RecurrenceType
 import com.example.doora.data.repository.TaskRepository
 import com.example.doora.ui.addtask.AddEditTaskScreen
 import com.example.doora.ui.calendar.CalendarScreen
@@ -152,12 +153,19 @@ fun DooraNavGraph(
             composable(Screen.Streaks.route) {
                 StreaksScreen(
                     repository = repository,
-                    onNavigateToAddTask = { navController.navigate("add_task") }
+                    onNavigateToAddTask = { navController.navigate("add_task?recurrence=DAILY") }
                 )
             }
 
             composable(
-                route = "add_task",
+                route = "add_task?recurrence={recurrence}",
+                arguments = listOf(
+                    navArgument("recurrence") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                ),
                 enterTransition = {
                     slideIntoContainer(
                         towards = AnimatedContentTransitionScope.SlideDirection.Up,
@@ -176,10 +184,16 @@ fun DooraNavGraph(
                         animationSpec = tween(240)
                     ) + fadeOut(tween(150))
                 }
-            ) {
+            ) { backStackEntry ->
+                val recurrenceArg = backStackEntry.arguments?.getString("recurrence")
+                val initialRecurrence = when (recurrenceArg) {
+                    "DAILY", "EVERY_DAY" -> RecurrenceType.DAILY
+                    else -> null
+                }
                 AddEditTaskScreen(
                     repository = repository,
                     occurrenceId = null,
+                    initialRecurrence = initialRecurrence,
                     onBack = { navController.popBackStack() }
                 )
             }

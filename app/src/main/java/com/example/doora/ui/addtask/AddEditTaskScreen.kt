@@ -87,11 +87,12 @@ import java.util.TimeZone
 fun AddEditTaskScreen(
     repository: TaskRepository,
     occurrenceId: Long?,
+    initialRecurrence: RecurrenceType? = null,
     onBack: () -> Unit
 ) {
     val vm: AddEditTaskViewModel = viewModel(
-        key = occurrenceId?.toString() ?: "add",
-        factory = AddEditTaskViewModel.Factory(repository, occurrenceId)
+        key = occurrenceId?.toString() ?: "add_${initialRecurrence?.name ?: "default"}",
+        factory = AddEditTaskViewModel.Factory(repository, occurrenceId, initialRecurrence)
     )
     val state by vm.state.collectAsState()
 

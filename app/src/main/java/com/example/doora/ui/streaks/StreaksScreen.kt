@@ -38,6 +38,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -105,7 +106,10 @@ fun StreaksScreen(
             ) {
                 // Section A: Header
                 item {
-                    StreaksHeader(activeDailyCount = state.dailyStreaks.size)
+                    StreaksHeader(
+                        activeDailyCount = state.dailyStreaks.size,
+                        onAddTask = onNavigateToAddTask
+                    )
                 }
 
                 // Section B: Current Streaks
@@ -205,7 +209,10 @@ fun StreaksScreen(
 }
 
 @Composable
-private fun StreaksHeader(activeDailyCount: Int) {
+private fun StreaksHeader(
+    activeDailyCount: Int,
+    onAddTask: () -> Unit = {}
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -226,28 +233,44 @@ private fun StreaksHeader(activeDailyCount: Int) {
             )
         }
 
-        // Habit count pill
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Habit count pill
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_fire),
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = Color(0xFFF79009)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "$activeDailyCount Daily",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onAddTask,
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.ic_fire),
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = Color(0xFFF79009)
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = "$activeDailyCount Daily",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Create Daily Task",
+                    tint = MaterialTheme.colorScheme.primary
                 )
             }
         }

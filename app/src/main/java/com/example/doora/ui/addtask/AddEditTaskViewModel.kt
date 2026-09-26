@@ -47,10 +47,15 @@ data class AddEditTaskUiState(
 
 class AddEditTaskViewModel(
     private val repository: TaskRepository,
-    private val occurrenceId: Long?
+    private val occurrenceId: Long?,
+    private val initialRecurrence: RecurrenceType? = null
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(AddEditTaskUiState())
+    private val _state = MutableStateFlow(
+        AddEditTaskUiState(
+            recurrenceType = initialRecurrence ?: RecurrenceType.ONE_TIME
+        )
+    )
     val state: StateFlow<AddEditTaskUiState> = _state.asStateFlow()
 
     init {
@@ -105,7 +110,8 @@ class AddEditTaskViewModel(
                     it.copy(
                         date = today,
                         usedColors = usedColors,
-                        color = firstFreeColor
+                        color = firstFreeColor,
+                        recurrenceType = initialRecurrence ?: it.recurrenceType
                     )
                 }
             }
@@ -237,10 +243,11 @@ class AddEditTaskViewModel(
 
     class Factory(
         private val repo: TaskRepository,
-        private val occurrenceId: Long?
+        private val occurrenceId: Long?,
+        private val initialRecurrence: RecurrenceType? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            AddEditTaskViewModel(repo, occurrenceId) as T
+            AddEditTaskViewModel(repo, occurrenceId, initialRecurrence) as T
     }
 }
