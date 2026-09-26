@@ -4,16 +4,47 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.doora.data.db.entity.TaskOccurrence
+import com.example.doora.data.model.OccurrenceStatus
+import com.example.doora.data.model.Priority
 import com.example.doora.data.repository.TaskRepository
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class HomeViewModel(private val repository: TaskRepository) : ViewModel() {
 
-    /** Today's occurrences, sorted by priority then time, as a hot StateFlow. */
+    /**
+     * Today's occurrences, strictly separated into:
+     * 1. Incomplete tasks (High -> Medium -> Low priority, then scheduled time)
+     * 2. Completed tasks (ordered by completedAt, scheduled time)
+     * Completed tasks ALWAYS remain below all incomplete tasks.
+     */
     val todayTasks: StateFlow<List<TaskOccurrence>> = repository.getTodayOccurrences()
+        .map { list ->
+            val incomplete = list.filter { it.status != OccurrenceStatus.COMPLETED }
+                .sortedWith(
+                    compareBy<TaskOccurrence> {
+                        when (it.priority) {
+                            Priority.HIGH -> 0
+                            Priority.MEDIUM -> 1
+                            Priority.LOW -> 2
+                        }
+                    }.thenBy { it.scheduledTimeMinutes }
+                     .thenBy { it.id }
+                )
+
+            val completed = list.filter { it.status == OccurrenceStatus.COMPLETED }
+                .sortedWith(
+                    compareBy<TaskOccurrence> { it.completedAt ?: 0L }
+                        .thenBy { it.scheduledTimeMinutes }
+                        .thenBy { it.id }
+                )
+
+            incomplete + completed
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
     init {
@@ -24,7 +55,11 @@ class HomeViewModel(private val repository: TaskRepository) : ViewModel() {
     }
 
     fun completeTask(occurrence: TaskOccurrence) {
-        viewModelScope.launch { repository.completeOccurrence(occurrence.id) }
+        viewModelScope.launch {
+            // Brief visual confirmation delay (180ms) before card moves downward into completed
+            delay(180)
+            repository.completeOccurrence(occurrence.id)
+        }
     }
 
     fun skipTask(occurrence: TaskOccurrence) {

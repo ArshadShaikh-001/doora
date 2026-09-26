@@ -1,10 +1,14 @@
 package com.example.doora.ui.home
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -53,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.doora.data.db.entity.TaskOccurrence
+import com.example.doora.data.model.OccurrenceStatus
 import com.example.doora.data.repository.TaskRepository
 import com.example.doora.ui.components.TaskCard
 import java.text.SimpleDateFormat
@@ -172,6 +178,13 @@ fun HomeScreen(
                 dateString = dateFormatted
             )
 
+            val incompleteTasks = remember(tasks) {
+                tasks.filter { it.status != OccurrenceStatus.COMPLETED }
+            }
+            val completedTasks = remember(tasks) {
+                tasks.filter { it.status == OccurrenceStatus.COMPLETED }
+            }
+
             if (tasks.isEmpty()) {
                 HomeEmptyState(onAddTask = onAddTask)
             } else {
@@ -180,15 +193,154 @@ fun HomeScreen(
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(tasks, key = { it.id }) { occurrence ->
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn() + slideInVertically { it / 3 },
-                            exit = fadeOut() + slideOutVertically { -it / 3 }
-                        ) {
+                    // Group 1: Incomplete / Active section header if completed tasks exist
+                    if (incompleteTasks.isNotEmpty() && completedTasks.isNotEmpty()) {
+                        item(key = "active_section_header") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 2.dp)
+                                    .animateItem(
+                                        fadeInSpec = tween(250),
+                                        fadeOutSpec = tween(200),
+                                        placementSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "ACTIVE",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                    letterSpacing = 1.2.sp
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "(${incompleteTasks.size})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                            }
+                        }
+                    }
+
+                    // Incomplete Tasks
+                    items(
+                        items = incompleteTasks,
+                        key = { it.id }
+                    ) { occurrence ->
+                        TaskCard(
+                            occurrence = occurrence,
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = tween(durationMillis = 300),
+                                fadeOutSpec = tween(durationMillis = 200),
+                                placementSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ),
+                            onComplete = { vm.completeTask(occurrence) },
+                            onSkip = { vm.skipTask(occurrence) },
+                            onEdit = { onEditTask(occurrence.id) },
+                            onDelete = { taskPendingDelete = occurrence }
+                        )
+                    }
+
+                    // All tasks completed banner
+                    if (incompleteTasks.isEmpty() && completedTasks.isNotEmpty()) {
+                        item(key = "all_tasks_completed_banner") {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                                    .animateItem(
+                                        fadeInSpec = tween(300),
+                                        fadeOutSpec = tween(200),
+                                        placementSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    ),
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0x1512B76A),
+                                border = BorderStroke(1.dp, Color(0x3312B76A))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "✨", fontSize = 16.sp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "All tasks completed for today",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF12B76A)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Group 2: Completed tasks section
+                    if (completedTasks.isNotEmpty()) {
+                        item(key = "completed_section_separator") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = if (incompleteTasks.isEmpty()) 0.dp else 12.dp, bottom = 2.dp)
+                                    .animateItem(
+                                        fadeInSpec = tween(250),
+                                        fadeOutSpec = tween(200),
+                                        placementSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "COMPLETED",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                    letterSpacing = 1.2.sp
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "(${completedTasks.size})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                HorizontalDivider(
+                                    modifier = Modifier.weight(1f),
+                                    thickness = 0.8.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                )
+                            }
+                        }
+
+                        items(
+                            items = completedTasks,
+                            key = { it.id }
+                        ) { occurrence ->
                             TaskCard(
                                 occurrence = occurrence,
-                                onComplete = { vm.completeTask(occurrence) },
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = tween(durationMillis = 300),
+                                    fadeOutSpec = tween(durationMillis = 200),
+                                    placementSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ),
+                                onComplete = {},
                                 onSkip = { vm.skipTask(occurrence) },
                                 onEdit = { onEditTask(occurrence.id) },
                                 onDelete = { taskPendingDelete = occurrence }

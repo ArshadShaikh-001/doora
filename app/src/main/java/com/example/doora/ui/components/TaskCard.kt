@@ -1,16 +1,12 @@
 package com.example.doora.ui.components
 
 import android.content.Context
-import android.os.Build
-import android.os.CombinedVibration
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import com.example.doora.ui.util.UiFeedbackHelper
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -185,9 +181,10 @@ fun TaskCard(
             if (isPending) {
                 ModernCompletionButton(
                     color = taskColor,
+                    isCompleted = justCompletedLocally,
                     onClick = {
                         justCompletedLocally = true
-                        vibrate1Second(context)
+                        UiFeedbackHelper.playCompletionFeedback(context)
                         onComplete()
                     }
                 )
@@ -273,21 +270,41 @@ fun TaskCard(
 @Composable
 private fun ModernCompletionButton(
     color: Color,
+    isCompleted: Boolean,
     onClick: () -> Unit
 ) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.85f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
+        targetValue = if (pressed) 0.88f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 500f),
         label = "btnScale"
+    )
+
+    val checkScale by animateFloatAsState(
+        targetValue = if (isCompleted) 1.0f else 0.0f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 450f),
+        label = "checkScale"
+    )
+
+    val borderColor by animateColorAsState(
+        targetValue = if (isCompleted) StatusCompletedColor else color.copy(alpha = 0.75f),
+        animationSpec = tween(durationMillis = 180),
+        label = "borderColor"
+    )
+
+    val fillColor by animateColorAsState(
+        targetValue = if (isCompleted) StatusCompletedColor else Color.Transparent,
+        animationSpec = tween(durationMillis = 180),
+        label = "fillColor"
     )
 
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(38.dp)
             .scale(scale)
             .clip(CircleShape)
             .clickable(
+                enabled = !isCompleted,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = ripple(bounded = false, radius = 20.dp),
                 onClick = {
@@ -299,9 +316,23 @@ private fun ModernCompletionButton(
     ) {
         Box(
             modifier = Modifier
-                .size(26.dp)
-                .border(2.dp, color.copy(alpha = 0.8f), CircleShape)
-        )
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(fillColor)
+                .border(2.dp, borderColor, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            if (checkScale > 0.05f) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Completed",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .size(15.dp)
+                        .scale(checkScale)
+                )
+            }
+        }
     }
 }
 
@@ -363,21 +394,3 @@ fun formatTime(minutes: Int): String {
     return "%d:%02d %s".format(h12, m, amPm)
 }
 
-/** Vibrates for approximately 1 second as required for completion */
-private fun vibrate1Second(context: Context) {
-    try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-            vm?.vibrate(CombinedVibration.createParallel(VibrationEffect.createOneShot(1000L, VibrationEffect.DEFAULT_AMPLITUDE)))
-        } else {
-            @Suppress("DEPRECATION")
-            val v = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                v?.vibrate(VibrationEffect.createOneShot(1000L, VibrationEffect.DEFAULT_AMPLITUDE))
-            } else {
-                @Suppress("DEPRECATION")
-                v?.vibrate(1000L)
-            }
-        }
-    } catch (_: Exception) {}
-}
