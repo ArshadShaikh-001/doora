@@ -3,7 +3,12 @@ package com.example.doora.ui.components
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import com.example.doora.ui.util.UiFeedbackHelper
@@ -75,6 +80,8 @@ fun TaskCard(
     onSkip: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    isRecurring: Boolean = false,
+    isOverdue: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -84,56 +91,62 @@ fun TaskCard(
     val isCompleted = occurrence.status == OccurrenceStatus.COMPLETED || justCompletedLocally
     val isPending = occurrence.status == OccurrenceStatus.PENDING && !justCompletedLocally
     val isSkipped = occurrence.status == OccurrenceStatus.SKIPPED
-    val isMissed = occurrence.status == OccurrenceStatus.MISSED
-    val isHighPriority = occurrence.priority == Priority.HIGH
+    val isEffectivelyOverdue = isOverdue && isPending
 
     val taskColor = Color(occurrence.color)
 
+    // Overdue urgency pulse (800-1200ms cycle)
+    val infiniteTransition = rememberInfiniteTransition(label = "overduePulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "overduePulseAlpha"
+    )
+
     // Animated completion feedback
     val contentAlpha by animateFloatAsState(
-        targetValue = if (isCompleted || isSkipped) 0.5f else 1.0f,
+        targetValue = if (isCompleted || isSkipped) 0.55f else 1.0f,
         animationSpec = tween(durationMillis = 250),
         label = "contentAlpha"
     )
 
-    val surfaceBg by animateColorAsState(
-        targetValue = when {
-            isCompleted -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-            isSkipped -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
-            isHighPriority -> MaterialTheme.colorScheme.surface
-            else -> MaterialTheme.colorScheme.surface
-        },
-        animationSpec = tween(durationMillis = 200),
-        label = "surfaceBg"
-    )
-
+    val surfaceBg = if (isCompleted) com.example.doora.ui.theme.LuxuryCompletedCardSurface else com.example.doora.ui.theme.LuxuryCardSurface
     val borderStroke = when {
-        isHighPriority && isPending -> BorderStroke(1.dp, PriorityHighColor.copy(alpha = 0.25f))
-        isSkipped -> BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-        else -> BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        isCompleted -> BorderStroke(1.dp, com.example.doora.ui.theme.GoldBorderSubdued)
+        isEffectivelyOverdue -> BorderStroke(1.2.dp, taskColor.copy(alpha = 0.25f + 0.45f * pulseAlpha))
+        else -> BorderStroke(1.dp, com.example.doora.ui.theme.GoldBorder)
     }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(22.dp),
         color = surfaceBg,
         border = borderStroke,
-        tonalElevation = if (isHighPriority && isPending) 2.dp else 0.dp
+        tonalElevation = 0.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(IntrinsicSize.Min)
-                .padding(start = 14.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
+                .padding(start = 16.dp, end = 12.dp, top = 16.dp, bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Task Unique Color Accent Pill
+            // Task Unique Color Accent Pill (pulses if overdue)
             Box(
                 modifier = Modifier
-                    .width(4.5.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(if (isCompleted || isSkipped) taskColor.copy(alpha = 0.4f) else taskColor)
+                    .width(4.dp)
+                    .height(30.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        when {
+                            isCompleted || isSkipped -> taskColor.copy(alpha = 0.45f)
+                            isEffectivelyOverdue -> taskColor.copy(alpha = pulseAlpha)
+                            else -> taskColor
+                        }
+                    )
             )
 
             Spacer(Modifier.width(14.dp))
@@ -142,22 +155,23 @@ fun TaskCard(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(end = 4.dp)
+                    .padding(end = 6.dp)
             ) {
                 // Task Title
                 Text(
                     text = occurrence.title,
                     style = MaterialTheme.typography.titleMedium,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
+                    color = if (isCompleted) com.example.doora.ui.theme.TextCompletedDark else Color.White,
                     textDecoration = if (isCompleted) TextDecoration.LineThrough else TextDecoration.None,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(5.dp))
 
-                // Time + Priority + Status tags
+                // Time + Priority + Status / Overdue tags
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -165,22 +179,52 @@ fun TaskCard(
                     Text(
                         text = formatTime(occurrence.scheduledTimeMinutes),
                         style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha)
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = if (isCompleted) com.example.doora.ui.theme.TextCompletedDark.copy(alpha = 0.8f) else Color(0xFF9E988F)
                     )
 
-                    PriorityPill(priority = occurrence.priority, alpha = contentAlpha)
+                    PriorityPill(priority = occurrence.priority, isDimmed = isCompleted)
 
-                    if (!isPending) {
+                    if (isCompleted) {
+                        Surface(
+                            shape = RoundedCornerShape(7.dp),
+                            color = Color(0x280D5A36)
+                        ) {
+                            Text(
+                                text = "Done",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF26D07C),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
+                    } else if (isSkipped) {
                         StatusPill(status = occurrence.status)
+                    } else if (isEffectivelyOverdue) {
+                        Surface(
+                            shape = RoundedCornerShape(7.dp),
+                            color = taskColor.copy(alpha = 0.16f * pulseAlpha)
+                        ) {
+                            Text(
+                                text = "Overdue",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = taskColor.copy(alpha = 0.45f + 0.55f * pulseAlpha),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            // Completion Circle Control (Only active when PENDING)
+            // Completion Circle Control (on the right)
             if (isPending) {
                 ModernCompletionButton(
                     color = taskColor,
+                    pulseAlpha = if (isEffectivelyOverdue) pulseAlpha else 1.0f,
                     isCompleted = justCompletedLocally,
                     onClick = {
                         justCompletedLocally = true
@@ -189,33 +233,32 @@ fun TaskCard(
                     }
                 )
             } else if (isCompleted) {
-                // Completed Checkmark Badge
+                // Completed Checkmark Badge in subtle tone
                 Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(StatusCompletedColor.copy(alpha = 0.15f)),
+                    modifier = Modifier.size(34.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Completed",
-                        tint = StatusCompletedColor,
-                        modifier = Modifier.size(18.dp)
+                        tint = com.example.doora.ui.theme.TextCompletedDark,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
 
-            // More Options Dropdown
+            Spacer(Modifier.width(4.dp))
+
+            // Three-dot Options Menu
             Box {
                 IconButton(
                     onClick = { menuExpanded = true },
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "Task options",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        tint = if (isCompleted) com.example.doora.ui.theme.GoldSecondary.copy(alpha = 0.5f) else com.example.doora.ui.theme.GoldSecondary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -223,11 +266,14 @@ fun TaskCard(
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    containerColor = com.example.doora.ui.theme.LuxuryCardSurface,
+                    border = BorderStroke(1.dp, com.example.doora.ui.theme.GoldBorder)
                 ) {
                     if (isPending) {
+                        val skipLabel = if (isRecurring) "Skip for today" else "Skip"
                         DropdownMenuItem(
-                            text = { Text("Skip for today") },
+                            text = { Text(skipLabel, color = com.example.doora.ui.theme.TextPrimaryDark) },
                             onClick = {
                                 menuExpanded = false
                                 onSkip()
@@ -235,9 +281,9 @@ fun TaskCard(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text("Edit") },
+                        text = { Text("Edit", color = com.example.doora.ui.theme.TextPrimaryDark) },
                         leadingIcon = {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Edit, contentDescription = null, tint = com.example.doora.ui.theme.GoldPrimary, modifier = Modifier.size(18.dp))
                         },
                         onClick = {
                             menuExpanded = false
@@ -270,13 +316,14 @@ fun TaskCard(
 @Composable
 private fun ModernCompletionButton(
     color: Color,
+    pulseAlpha: Float = 1.0f,
     isCompleted: Boolean,
     onClick: () -> Unit
 ) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.88f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 500f),
+        targetValue = if (pressed) 0.86f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 500f),
         label = "btnScale"
     )
 
@@ -286,21 +333,15 @@ private fun ModernCompletionButton(
         label = "checkScale"
     )
 
-    val borderColor by animateColorAsState(
-        targetValue = if (isCompleted) StatusCompletedColor else color.copy(alpha = 0.75f),
-        animationSpec = tween(durationMillis = 180),
-        label = "borderColor"
-    )
-
     val fillColor by animateColorAsState(
-        targetValue = if (isCompleted) StatusCompletedColor else Color.Transparent,
-        animationSpec = tween(durationMillis = 180),
+        targetValue = if (isCompleted) color.copy(alpha = 0.2f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 150),
         label = "fillColor"
     )
 
     Box(
         modifier = Modifier
-            .size(38.dp)
+            .size(36.dp)
             .scale(scale)
             .clip(CircleShape)
             .clickable(
@@ -316,19 +357,19 @@ private fun ModernCompletionButton(
     ) {
         Box(
             modifier = Modifier
-                .size(24.dp)
+                .size(28.dp)
                 .clip(CircleShape)
                 .background(fillColor)
-                .border(2.dp, borderColor, CircleShape),
+                .border(2.dp, color.copy(alpha = pulseAlpha), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             if (checkScale > 0.05f) {
                 Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = "Completed",
-                    tint = Color.White,
+                    tint = color,
                     modifier = Modifier
-                        .size(15.dp)
+                        .size(16.dp)
                         .scale(checkScale)
                 )
             }
@@ -337,7 +378,7 @@ private fun ModernCompletionButton(
 }
 
 @Composable
-fun PriorityPill(priority: Priority, alpha: Float = 1.0f) {
+fun PriorityPill(priority: Priority, isDimmed: Boolean = false) {
     val (label, textCol, bgCol) = when (priority) {
         Priority.HIGH -> Triple("High", PriorityHighColor, PriorityHighBg)
         Priority.MEDIUM -> Triple("Med", PriorityMediumColor, PriorityMediumBg)
@@ -345,15 +386,16 @@ fun PriorityPill(priority: Priority, alpha: Float = 1.0f) {
     }
 
     Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = bgCol.copy(alpha = bgCol.alpha * alpha)
+        shape = RoundedCornerShape(8.dp),
+        color = if (isDimmed) bgCol.copy(alpha = bgCol.alpha * 0.45f) else bgCol
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.SemiBold,
-            color = textCol.copy(alpha = alpha),
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+            color = if (isDimmed) textCol.copy(alpha = 0.5f) else textCol,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
         )
     }
 }

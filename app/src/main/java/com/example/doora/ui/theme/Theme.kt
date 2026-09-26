@@ -13,23 +13,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
+import androidx.compose.ui.graphics.Color
+
 private val DarkColorScheme = darkColorScheme(
-    primary = DooraPrimaryDark,
-    onPrimary = DooraOnPrimaryDark,
-    primaryContainer = DooraPrimaryContainerDark,
-    onPrimaryContainer = DooraOnPrimaryContainerDark,
-    secondary = DooraSecondaryDark,
-    onSecondary = DooraOnSecondaryDark,
-    secondaryContainer = DooraSecondaryContainerDark,
-    onSecondaryContainer = DooraOnSecondaryContainerDark,
-    background = DooraBackgroundDark,
-    onBackground = DooraOnBackgroundDark,
-    surface = DooraSurfaceDark,
-    onSurface = DooraOnSurfaceDark,
-    surfaceVariant = DooraSurfaceVariantDark,
-    onSurfaceVariant = DooraOnSurfaceVariantDark,
-    outline = DooraOutlineDark,
-    outlineVariant = DooraOutlineVariantDark
+    primary = GoldPrimary,
+    onPrimary = Color(0xFF14120E),
+    primaryContainer = Color(0xFF332A1C),
+    onPrimaryContainer = GoldPrimary,
+    secondary = GoldSecondary,
+    onSecondary = Color(0xFF14120E),
+    secondaryContainer = GoldPillBg,
+    onSecondaryContainer = GoldPrimary,
+    background = LuxuryBackground,
+    onBackground = TextPrimaryDark,
+    surface = LuxuryCardSurface,
+    onSurface = TextPrimaryDark,
+    surfaceVariant = LuxuryCompletedCardSurface,
+    onSurfaceVariant = TextSecondaryDark,
+    outline = GoldSecondary.copy(alpha = 0.4f),
+    outlineVariant = GoldBorder
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -61,8 +63,8 @@ val DooraShapes = Shapes(
 
 @Composable
 fun DooraTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    darkTheme: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {

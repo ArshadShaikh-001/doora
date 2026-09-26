@@ -33,14 +33,8 @@ class TaskOrderingTest {
     private fun sortTasks(list: List<TaskOccurrence>): List<TaskOccurrence> {
         val incomplete = list.filter { it.status != OccurrenceStatus.COMPLETED }
             .sortedWith(
-                compareBy<TaskOccurrence> {
-                    when (it.priority) {
-                        Priority.HIGH -> 0
-                        Priority.MEDIUM -> 1
-                        Priority.LOW -> 2
-                    }
-                }.thenBy { it.scheduledTimeMinutes }
-                 .thenBy { it.id }
+                compareBy<TaskOccurrence> { it.scheduledTimeMinutes }
+                    .thenBy { it.id }
             )
 
         val completed = list.filter { it.status == OccurrenceStatus.COMPLETED }
@@ -54,6 +48,24 @@ class TaskOrderingTest {
     }
 
     @Test
+    fun testScheduledTimeAscendingOverridesPriority() {
+        // User example:
+        // Reading 6:00 PM Medium
+        // DSA 8:00 PM High
+        // Typing 9:00 PM Low
+        val list = listOf(
+            occ(1L, "DSA", Priority.HIGH, 20 * 60, OccurrenceStatus.PENDING), // 8:00 PM
+            occ(2L, "Typing", Priority.LOW, 21 * 60, OccurrenceStatus.PENDING), // 9:00 PM
+            occ(3L, "Reading", Priority.MEDIUM, 18 * 60, OccurrenceStatus.PENDING) // 6:00 PM
+        )
+
+        val sorted = sortTasks(list)
+        assertEquals("Reading", sorted[0].title)
+        assertEquals("DSA", sorted[1].title)
+        assertEquals("Typing", sorted[2].title)
+    }
+
+    @Test
     fun testIncompleteBeforeCompleted() {
         val list = listOf(
             occ(1L, "DSA", Priority.HIGH, 600, OccurrenceStatus.COMPLETED, completedAt = 1000L),
@@ -63,31 +75,17 @@ class TaskOrderingTest {
         )
 
         val sorted = sortTasks(list)
-        // Reading (Pending, Medium) and Typing (Pending, Low) must be FIRST
-        assertEquals("Reading", sorted[0].title)
-        assertEquals("Typing", sorted[1].title)
+        // Typing (500) and Reading (700) must be FIRST (ordered by time ASC)
+        assertEquals("Typing", sorted[0].title)
+        assertEquals("Reading", sorted[1].title)
         // Exercise and DSA must be AFTER incomplete
         assertEquals("Exercise", sorted[2].title)
         assertEquals("DSA", sorted[3].title)
     }
 
     @Test
-    fun testPriorityOrderingWithinIncomplete() {
-        val list = listOf(
-            occ(1L, "LowTask", Priority.LOW, 500, OccurrenceStatus.PENDING),
-            occ(2L, "HighTask", Priority.HIGH, 900, OccurrenceStatus.PENDING),
-            occ(3L, "MedTask", Priority.MEDIUM, 600, OccurrenceStatus.PENDING)
-        )
-
-        val sorted = sortTasks(list)
-        assertEquals("HighTask", sorted[0].title)
-        assertEquals("MedTask", sorted[1].title)
-        assertEquals("LowTask", sorted[2].title)
-    }
-
-    @Test
     fun testNewTaskEntersAboveAllCompletedTasks() {
-        // Initially: Reading, Typing, and completed: Exercise, DSA
+        // Initially: Reading (600), Typing (700), and completed: Exercise, DSA
         val existing = listOf(
             occ(1L, "Reading", Priority.MEDIUM, 600, OccurrenceStatus.PENDING),
             occ(2L, "Typing", Priority.LOW, 700, OccurrenceStatus.PENDING),
@@ -95,11 +93,11 @@ class TaskOrderingTest {
             occ(4L, "DSA", Priority.MEDIUM, 800, OccurrenceStatus.COMPLETED, completedAt = 200L)
         )
 
-        // New Task "Gym" added (Pending, High priority)
+        // New Task "Gym" added (Pending, High priority, 400 min)
         val withNewTask = existing + occ(5L, "Gym", Priority.HIGH, 400, OccurrenceStatus.PENDING)
         val sorted = sortTasks(withNewTask)
 
-        // Gym must appear at the top of incomplete, strictly above all completed
+        // Gym (400 min) must appear at the top of incomplete, strictly above all completed
         assertEquals("Gym", sorted[0].title)
         assertEquals("Reading", sorted[1].title)
         assertEquals("Typing", sorted[2].title)

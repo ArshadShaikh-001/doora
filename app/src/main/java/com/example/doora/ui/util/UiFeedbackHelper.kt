@@ -16,6 +16,7 @@ object UiFeedbackHelper {
     private var soundPool: SoundPool? = null
     private var completeSoundId: Int = 0
     private var createdSoundId: Int = 0
+    private var navClickSoundId: Int = 0
     private var isLoaded: Boolean = false
 
     fun init(context: Context) {
@@ -33,6 +34,7 @@ object UiFeedbackHelper {
             .apply {
                 completeSoundId = load(appContext, R.raw.task_complete, 1)
                 createdSoundId = load(appContext, R.raw.task_created, 1)
+                navClickSoundId = load(appContext, R.raw.nav_click, 1)
                 setOnLoadCompleteListener { _, _, _ ->
                     isLoaded = true
                 }
@@ -63,6 +65,17 @@ object UiFeedbackHelper {
         // 2. Soft upward whoosh UI sound
         if (isAudioAllowed(context) && soundPool != null && createdSoundId != 0) {
             soundPool?.play(createdSoundId, 0.30f, 0.30f, 1, 0, 1.0f)
+        }
+    }
+
+    fun playNavigationFeedback(context: Context) {
+        init(context)
+        // 1. Light tactile tick
+        performCreatedHaptic(context)
+
+        // 2. Very subtle click sound
+        if (isAudioAllowed(context) && soundPool != null && navClickSoundId != 0) {
+            soundPool?.play(navClickSoundId, 0.22f, 0.22f, 1, 0, 1.0f)
         }
     }
 

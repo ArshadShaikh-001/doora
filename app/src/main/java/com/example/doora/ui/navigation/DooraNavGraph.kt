@@ -19,6 +19,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,6 +39,7 @@ import com.example.doora.ui.calendar.CalendarScreen
 import com.example.doora.ui.home.HomeScreen
 import com.example.doora.ui.statistics.StatisticsScreen
 import com.example.doora.ui.streaks.StreaksScreen
+import com.example.doora.ui.util.UiFeedbackHelper
 
 sealed class Screen(
     val route: String,
@@ -55,6 +58,7 @@ fun DooraNavGraph(
     navController: NavHostController,
     repository: TaskRepository
 ) {
+    val context = LocalContext.current
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
@@ -65,7 +69,7 @@ fun DooraNavGraph(
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = com.example.doora.ui.theme.LuxuryBottomNav,
                     tonalElevation = 0.dp
                 ) {
                     bottomNavScreens.forEach { screen ->
@@ -74,6 +78,7 @@ fun DooraNavGraph(
                             selected = selected,
                             onClick = {
                                 if (currentRoute != screen.route) {
+                                    UiFeedbackHelper.playNavigationFeedback(context)
                                     navController.navigate(screen.route) {
                                         popUpTo(navController.graph.findStartDestination().id) {
                                             saveState = true
@@ -104,11 +109,11 @@ fun DooraNavGraph(
                                 )
                             },
                             colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                                selectedIconColor = com.example.doora.ui.theme.GoldPrimary,
+                                selectedTextColor = com.example.doora.ui.theme.GoldPrimary,
+                                indicatorColor = Color(0x38393345),
+                                unselectedIconColor = com.example.doora.ui.theme.TextSecondaryDark.copy(alpha = 0.75f),
+                                unselectedTextColor = com.example.doora.ui.theme.TextSecondaryDark.copy(alpha = 0.75f)
                             )
                         )
                     }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ripple
@@ -131,7 +132,7 @@ private fun ModernColorSwatch(
             modifier = Modifier
                 .size(34.dp)
                 .clip(CircleShape)
-                .background(if (isUnavailable) color.copy(alpha = 0.2f) else color)
+                .background(if (isUnavailable) color.copy(alpha = 0.22f) else color)
                 .clickable(
                     enabled = !isUnavailable,
                     interactionSource = remember { MutableInteractionSource() },
@@ -140,6 +141,15 @@ private fun ModernColorSwatch(
                 ),
             contentAlignment = Alignment.Center
         ) {
+            if (isUnavailable) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Color locked",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+
             AnimatedVisibility(
                 visible = isSelected,
                 enter = fadeIn() + scaleIn(),

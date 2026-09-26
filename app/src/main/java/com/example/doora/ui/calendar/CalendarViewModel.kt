@@ -4,10 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.doora.data.db.entity.TaskOccurrence
+import com.example.doora.data.db.entity.TaskTemplate
+import com.example.doora.data.model.OccurrenceStatus
 import com.example.doora.data.repository.TaskRepository
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -34,6 +39,10 @@ data class CalendarDay(
 
 class CalendarViewModel(private val repository: TaskRepository) : ViewModel() {
 
+    val templateMap: StateFlow<Map<Long, TaskTemplate>> = repository.observeAllTemplates()
+        .map { list -> list.associateBy { it.id } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyMap())
+
     private val calendar = Calendar.getInstance()
     private val monthFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
     private val yearMonthFormat = SimpleDateFormat("yyyy-MM", Locale.US)
@@ -42,6 +51,14 @@ class CalendarViewModel(private val repository: TaskRepository) : ViewModel() {
     private val _state = MutableStateFlow(CalendarUiState())
     val state: StateFlow<CalendarUiState> = _state.asStateFlow()
 
+    private fun sortOccurrences(list: List<TaskOccurrence>): List<TaskOccurrence> {
+        val incomplete = list.filter { it.status != OccurrenceStatus.COMPLETED }
+            .sortedWith(compareBy<TaskOccurrence> { it.scheduledTimeMinutes }.thenBy { it.id })
+        val completed = list.filter { it.status == OccurrenceStatus.COMPLETED }
+            .sortedWith(compareBy<TaskOccurrence> { it.completedAt ?: 0L }.thenBy { it.scheduledTimeMinutes }.thenBy { it.id })
+        return incomplete + completed
+    }
+
     init {
         val today = repository.todayString()
         _state.update { it.copy(selectedDate = today) }
@@ -49,7 +66,7 @@ class CalendarViewModel(private val repository: TaskRepository) : ViewModel() {
 
         viewModelScope.launch {
             repository.observeAllOccurrences().collect { allOccurrences ->
-                val byDate = allOccurrences.groupBy { it.scheduledDate }
+                val byDate = allOccurrences.groupBy { it.scheduledDate }.mapValues { (_, v) -> sortOccurrences(v) }
                 _state.update { current ->
                     val selectedTasks = byDate[current.selectedDate] ?: emptyList()
                     val updatedDays = current.daysInMonth.map { day ->
@@ -141,6 +158,18 @@ class CalendarViewModel(private val repository: TaskRepository) : ViewModel() {
 
     fun skipTask(occurrence: TaskOccurrence) {
         viewModelScope.launch { repository.skipOccurrence(occurrence.id) }
+    }
+
+    fun deleteOccurrenceOnly(occurrence: TaskOccurrence) {
+        viewModelScope.launch { repository.deleteOccurrence(occurrence) }
+    }
+
+    fun deleteRecurring(occurrence: TaskOccurrence) {
+        viewModelScope.launch { repository.deleteRecurringTemplate(occurrence.templateId) }
+    }
+
+    suspend fun isRecurring(templateId: Long): Boolean {
+        return repository.isRecurring(templateId)
     }
 
     class Factory(private val repo: TaskRepository) : ViewModelProvider.Factory {

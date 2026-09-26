@@ -52,6 +52,9 @@ class TaskRepository(
     fun observeActiveTemplates(): Flow<List<TaskTemplate>> =
         templateDao.observeActiveTemplates()
 
+    fun observeAllTemplates(): Flow<List<TaskTemplate>> =
+        templateDao.observeAllTemplates()
+
     fun observeActiveDailyTemplates(): Flow<List<TaskTemplate>> =
         templateDao.observeActiveTemplates().map { templates ->
             templates.filter { it.recurrenceType == RecurrenceType.DAILY }
@@ -164,6 +167,7 @@ class TaskRepository(
         color: Int
     ): Result<Unit> = runCatching {
         if (hasTimeConflict(date, timeMinutes)) error("A task already exists at this time on $date")
+        if (color in getUsedColors()) error("Color is already in use by another active task")
         val templateId = templateDao.insert(
             TaskTemplate(
                 title = title,
@@ -201,6 +205,7 @@ class TaskRepository(
         if (startDate == today && hasTimeConflict(today, timeMinutes)) {
             error("A task already exists at this time today")
         }
+        if (color in getUsedColors()) error("Color is already in use by another active task")
 
         val template = TaskTemplate(
             title = title,
@@ -260,10 +265,19 @@ class TaskRepository(
     // Mutations — Delete
     // ---------------------------------------------------------------------------
 
-    /** Deletes single occurrence */
+    /** Deletes single occurrence. If it belongs to a one-time task, deactivates the template to release its color. */
     suspend fun deleteOccurrence(occurrence: TaskOccurrence) {
         AlarmHelper.cancelAlarm(context, occurrence.id)
         occurrenceDao.deleteById(occurrence.id)
+        val template = templateDao.getById(occurrence.templateId)
+        if (template != null && template.recurrenceType == RecurrenceType.ONE_TIME) {
+            templateDao.softDelete(occurrence.templateId)
+        }
+    }
+
+    suspend fun isRecurring(templateId: Long): Boolean {
+        val template = templateDao.getById(templateId)
+        return template != null && template.recurrenceType != RecurrenceType.ONE_TIME
     }
 
     /**
@@ -295,6 +309,9 @@ class TaskRepository(
     ): Result<Unit> = runCatching {
         if (hasTimeConflict(occurrence.scheduledDate, timeMinutes, occurrence.id)) {
             error("A task already exists at this time on ${occurrence.scheduledDate}")
+        }
+        if (color in getUsedColors(excludeTemplateId = occurrence.templateId)) {
+            error("Color is already in use by another active task")
         }
         val updated = occurrence.copy(
             title = title,
@@ -328,6 +345,9 @@ class TaskRepository(
         val currentOcc = occurrenceDao.findByTemplateAndDate(template.id, today)
         if (currentOcc != null && hasTimeConflict(today, timeMinutes, currentOcc.id)) {
             error("A task already exists at this time today")
+        }
+        if (color in getUsedColors(excludeTemplateId = template.id)) {
+            error("Color is already in use by another active task")
         }
 
         val updatedTemplate = template.copy(

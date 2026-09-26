@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.doora.data.db.entity.TaskOccurrence
+import com.example.doora.data.db.entity.TaskTemplate
 import com.example.doora.data.model.OccurrenceStatus
 import com.example.doora.data.model.Priority
 import com.example.doora.data.repository.TaskRepository
@@ -16,9 +17,14 @@ import kotlinx.coroutines.launch
 
 class HomeViewModel(private val repository: TaskRepository) : ViewModel() {
 
+    val templateMap: StateFlow<Map<Long, TaskTemplate>> = repository.observeAllTemplates()
+        .map { list -> list.associateBy { it.id } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyMap())
+
     /**
      * Today's occurrences, strictly separated into:
-     * 1. Incomplete tasks (High -> Medium -> Low priority, then scheduled time)
+     * 1. Incomplete tasks (ordered strictly by scheduledTimeMinutes ASC, id ASC)
+     *    Priority MUST NOT change ordering — scheduled time always comes first.
      * 2. Completed tasks (ordered by completedAt, scheduled time)
      * Completed tasks ALWAYS remain below all incomplete tasks.
      */
@@ -26,14 +32,8 @@ class HomeViewModel(private val repository: TaskRepository) : ViewModel() {
         .map { list ->
             val incomplete = list.filter { it.status != OccurrenceStatus.COMPLETED }
                 .sortedWith(
-                    compareBy<TaskOccurrence> {
-                        when (it.priority) {
-                            Priority.HIGH -> 0
-                            Priority.MEDIUM -> 1
-                            Priority.LOW -> 2
-                        }
-                    }.thenBy { it.scheduledTimeMinutes }
-                     .thenBy { it.id }
+                    compareBy<TaskOccurrence> { it.scheduledTimeMinutes }
+                        .thenBy { it.id }
                 )
 
             val completed = list.filter { it.status == OccurrenceStatus.COMPLETED }
@@ -72,6 +72,10 @@ class HomeViewModel(private val repository: TaskRepository) : ViewModel() {
 
     fun deleteRecurring(occurrence: TaskOccurrence) {
         viewModelScope.launch { repository.deleteRecurringTemplate(occurrence.templateId) }
+    }
+
+    suspend fun isRecurring(templateId: Long): Boolean {
+        return repository.isRecurring(templateId)
     }
 
     class Factory(private val repo: TaskRepository) : ViewModelProvider.Factory {

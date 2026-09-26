@@ -116,7 +116,12 @@ class AddEditTaskViewModel(
     fun updateDate(v: String) { _state.update { it.copy(date = v, error = null) } }
     fun updateTime(minutes: Int) { _state.update { it.copy(timeMinutes = minutes, error = null) } }
     fun updatePriority(v: Priority) { _state.update { it.copy(priority = v) } }
-    fun updateColor(v: Int) { _state.update { it.copy(color = v) } }
+    fun updateColor(v: Int) {
+        val s = _state.value
+        if (v !in s.usedColors) {
+            _state.update { it.copy(color = v, error = null) }
+        }
+    }
     fun updateRecurrence(v: RecurrenceType) { _state.update { it.copy(recurrenceType = v) } }
     fun updateEditScope(scope: EditScope) { _state.update { it.copy(editScope = scope) } }
 
@@ -154,6 +159,10 @@ class AddEditTaskViewModel(
         val s = _state.value
         if (s.title.isBlank()) {
             _state.update { it.copy(error = "Title cannot be empty") }
+            return
+        }
+        if (s.color in s.usedColors) {
+            _state.update { it.copy(error = "This color is already in use by another active task") }
             return
         }
 

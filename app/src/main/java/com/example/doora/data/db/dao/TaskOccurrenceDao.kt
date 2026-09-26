@@ -16,9 +16,7 @@ interface TaskOccurrenceDao {
         """
         SELECT * FROM task_occurrences
         WHERE scheduledDate = :date
-        ORDER BY
-            CASE priority WHEN 'HIGH' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END ASC,
-            scheduledTimeMinutes ASC
+        ORDER BY scheduledTimeMinutes ASC, id ASC
         """
     )
     fun observeForDate(date: String): Flow<List<TaskOccurrence>>
