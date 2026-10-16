@@ -223,6 +223,7 @@ class AlarmActivity : ComponentActivity() {
             val repo = (application as DooraApplication).repository
             CoroutineScope(Dispatchers.IO).launch {
                 repo.clearSnooze(occurrenceId)
+                repo.startHourlyReminder(occurrenceId)
             }
         }
         finish()

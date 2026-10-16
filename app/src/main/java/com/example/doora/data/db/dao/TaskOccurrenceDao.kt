@@ -85,4 +85,10 @@ interface TaskOccurrenceDao {
 
     @Query("DELETE FROM task_occurrences WHERE templateId = :templateId AND scheduledDate >= :fromDate AND status = 'PENDING'")
     suspend fun deleteFuturePendingOccurrences(templateId: Long, fromDate: String)
+
+    @Query("SELECT * FROM task_occurrences WHERE hourlyReminderActive = 1 AND status = 'PENDING'")
+    suspend fun getActiveReminderOccurrences(): List<TaskOccurrence>
+
+    @Query("UPDATE task_occurrences SET hourlyReminderActive = :active, nextReminderMillis = :nextReminderMillis WHERE id = :id")
+    suspend fun updateHourlyReminder(id: Long, active: Boolean, nextReminderMillis: Long?)
 }

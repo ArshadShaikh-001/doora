@@ -16,9 +16,16 @@ class DooraApplication : Application() {
         }
     }
 
+    private val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE task_occurrences ADD COLUMN hourlyReminderActive INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE task_occurrences ADD COLUMN nextReminderMillis INTEGER DEFAULT NULL")
+        }
+    }
+
     val database: DooraDatabase by lazy {
         Room.databaseBuilder(applicationContext, DooraDatabase::class.java, "doora.db")
-            .addMigrations(MIGRATION_2_3)
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
             .fallbackToDestructiveMigration(true)
             .build()
     }

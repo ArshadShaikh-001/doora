@@ -1,6 +1,10 @@
 package com.example.doora.data.repository
 
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import com.example.doora.alarm.AlarmActionReceiver
 import com.example.doora.alarm.AlarmHelper
 import com.example.doora.data.db.dao.TaskOccurrenceDao
 import com.example.doora.data.db.dao.TaskTemplateDao
@@ -78,7 +82,10 @@ class TaskRepository(
                 // Still in active snooze, keep pending
             } else {
                 occurrenceDao.updateStatus(pastOccurrence.id, OccurrenceStatus.MISSED, null)
+                occurrenceDao.updateHourlyReminder(pastOccurrence.id, active = false, nextReminderMillis = null)
                 AlarmHelper.cancelAlarm(context, pastOccurrence.id)
+                AlarmHelper.cancelHourlyReminderAlarm(context, pastOccurrence.id)
+                AlarmHelper.cancelHourlyReminderNotification(context, pastOccurrence.id)
             }
         }
     }
@@ -86,11 +93,13 @@ class TaskRepository(
     /**
      * Called on Home load and day transition:
      * 1. Rolls over past pending tasks to MISSED.
-     * 2. Generates today's occurrence for any active templates that match today.
-     * 3. Schedules future alarms.
+     * 2. Reconciles active hourly follow-up reminders.
+     * 3. Generates today's occurrence for any active templates that match today.
+     * 4. Schedules future alarms.
      */
     suspend fun ensureTodayOccurrences() {
         processDayTransition()
+        reconcileActiveReminders()
         val today = todayString()
         val activeTemplates = templateDao.getActiveTemplates()
 
@@ -257,21 +266,31 @@ class TaskRepository(
     suspend fun completeOccurrence(id: Long) {
         occurrenceDao.updateStatus(id, OccurrenceStatus.COMPLETED, System.currentTimeMillis())
         occurrenceDao.updateSnooze(id, null)
+        occurrenceDao.updateHourlyReminder(id, active = false, nextReminderMillis = null)
         AlarmHelper.cancelAlarm(context, id)
+        AlarmHelper.cancelHourlyReminderAlarm(context, id)
+        AlarmHelper.cancelHourlyReminderNotification(context, id)
     }
 
     suspend fun skipOccurrence(id: Long) {
         occurrenceDao.updateStatus(id, OccurrenceStatus.SKIPPED, null)
         occurrenceDao.updateSnooze(id, null)
+        occurrenceDao.updateHourlyReminder(id, active = false, nextReminderMillis = null)
         AlarmHelper.cancelAlarm(context, id)
+        AlarmHelper.cancelHourlyReminderAlarm(context, id)
+        AlarmHelper.cancelHourlyReminderNotification(context, id)
     }
 
     suspend fun snoozeOccurrence(id: Long, minutes: Int = 10) {
         val snoozedUntil = System.currentTimeMillis() + (minutes * 60 * 1000L)
         occurrenceDao.updateSnooze(id, snoozedUntil)
+        // Snoozing must not start reminders and cancels any pending reminder sequence
+        occurrenceDao.updateHourlyReminder(id, active = false, nextReminderMillis = null)
+        AlarmHelper.cancelHourlyReminderAlarm(context, id)
+        AlarmHelper.cancelHourlyReminderNotification(context, id)
         val occ = occurrenceDao.findById(id)
         if (occ != null) {
-            AlarmHelper.scheduleAlarm(context, occ.copy(snoozedUntilMillis = snoozedUntil))
+            AlarmHelper.scheduleAlarm(context, occ.copy(snoozedUntilMillis = snoozedUntil, hourlyReminderActive = false, nextReminderMillis = null))
         }
     }
 
@@ -282,7 +301,10 @@ class TaskRepository(
     suspend fun markMissed(id: Long) {
         occurrenceDao.updateStatus(id, OccurrenceStatus.MISSED, null)
         occurrenceDao.updateSnooze(id, null)
+        occurrenceDao.updateHourlyReminder(id, active = false, nextReminderMillis = null)
         AlarmHelper.cancelAlarm(context, id)
+        AlarmHelper.cancelHourlyReminderAlarm(context, id)
+        AlarmHelper.cancelHourlyReminderNotification(context, id)
     }
 
     /**
@@ -325,13 +347,146 @@ class TaskRepository(
             scheduledDate = newDate,
             scheduledTimeMinutes = newTimeMinutes,
             snoozedUntilMillis = null,
-            status = OccurrenceStatus.PENDING
+            status = OccurrenceStatus.PENDING,
+            hourlyReminderActive = false,
+            nextReminderMillis = null
         )
         occurrenceDao.update(updated)
 
-        // Cancel previous alarm and schedule the new alarm
+        // Cancel previous alarm, reminder alarm, and reminder notification
         AlarmHelper.cancelAlarm(context, occurrenceId)
+        AlarmHelper.cancelHourlyReminderAlarm(context, occurrenceId)
+        AlarmHelper.cancelHourlyReminderNotification(context, occurrenceId)
         AlarmHelper.scheduleAlarm(context, updated)
+    }
+
+    // ---------------------------------------------------------------------------
+    // Hourly Completion Reminders
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Called when an alarm is dismissed without completing the task.
+     * Schedules the first follow-up notification for exactly 1 hour after dismissal.
+     */
+    suspend fun startHourlyReminder(occurrenceId: Long) {
+        val occ = occurrenceDao.findById(occurrenceId) ?: return
+        if (occ.status != OccurrenceStatus.PENDING) return
+        val today = todayString()
+        if (occ.scheduledDate < today) {
+            markMissed(occurrenceId)
+            return
+        }
+
+        val firstReminderTime = System.currentTimeMillis() + 60 * 60 * 1000L
+        occurrenceDao.updateHourlyReminder(occurrenceId, active = true, nextReminderMillis = firstReminderTime)
+        AlarmHelper.scheduleHourlyReminderAlarm(context, occurrenceId, firstReminderTime)
+    }
+
+    /**
+     * Triggered by HourlyReminderReceiver when an hourly reminder is due.
+     * Posts the notification and schedules the next reminder 1 hour later.
+     */
+    suspend fun triggerHourlyReminder(occurrenceId: Long) {
+        val occ = occurrenceDao.findById(occurrenceId) ?: return
+        if (occ.status != OccurrenceStatus.PENDING || !occ.hourlyReminderActive) return
+
+        val today = todayString()
+        if (occ.scheduledDate < today) {
+            markMissed(occurrenceId)
+            return
+        }
+
+        // 1. Post notification
+        showHourlyReminderNotification(occ)
+
+        // 2. Schedule next hourly reminder for 1 hour later
+        val nextTrigger = System.currentTimeMillis() + 60 * 60 * 1000L
+        occurrenceDao.updateHourlyReminder(occurrenceId, active = true, nextReminderMillis = nextTrigger)
+        AlarmHelper.scheduleHourlyReminderAlarm(context, occurrenceId, nextTrigger)
+    }
+
+    private fun showHourlyReminderNotification(occurrence: TaskOccurrence) {
+        val markIntent = Intent(context, AlarmActionReceiver::class.java).apply {
+            action = AlarmHelper.ACTION_MARK_COMPLETED
+            putExtra(AlarmHelper.EXTRA_OCCURRENCE_ID, occurrence.id)
+        }
+        val markPendingIntent = PendingIntent.getBroadcast(
+            context,
+            occurrence.id.toInt() + 600000,
+            markIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val noIntent = Intent(context, AlarmActionReceiver::class.java).apply {
+            action = AlarmHelper.ACTION_REMINDER_NO
+            putExtra(AlarmHelper.EXTRA_OCCURRENCE_ID, occurrence.id)
+        }
+        val noPendingIntent = PendingIntent.getBroadcast(
+            context,
+            occurrence.id.toInt() + 700000,
+            noIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val openAppIntent = Intent(context, com.example.doora.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val openAppPendingIntent = PendingIntent.getActivity(
+            context,
+            occurrence.id.toInt() + 800000,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = androidx.core.app.NotificationCompat.Builder(context, AlarmHelper.REMINDER_CHANNEL_ID)
+            .setSmallIcon(com.example.doora.R.mipmap.ic_launcher)
+            .setContentTitle(occurrence.title)
+            .setContentText("Task Completed ? Mark it here !!")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(false)
+            .setContentIntent(openAppPendingIntent)
+            .addAction(0, "mark it", markPendingIntent)
+            .addAction(0, "no", noPendingIntent)
+            .build()
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.notify(occurrence.id.toInt() + 500000, notification)
+    }
+
+    /**
+     * Cancels any active hourly reminder for the given occurrence id.
+     */
+    suspend fun cancelHourlyReminder(occurrenceId: Long) {
+        occurrenceDao.updateHourlyReminder(occurrenceId, active = false, nextReminderMillis = null)
+        AlarmHelper.cancelHourlyReminderAlarm(context, occurrenceId)
+        AlarmHelper.cancelHourlyReminderNotification(context, occurrenceId)
+    }
+
+    /**
+     * Reconciles scheduled reminders against Room data on app launch and reboot.
+     */
+    suspend fun reconcileActiveReminders() {
+        val today = todayString()
+        val now = System.currentTimeMillis()
+        val activeReminders = occurrenceDao.getActiveReminderOccurrences()
+
+        activeReminders.forEach { occ ->
+            if (occ.status != OccurrenceStatus.PENDING || occ.scheduledDate < today) {
+                if (occ.status == OccurrenceStatus.PENDING && occ.scheduledDate < today) {
+                    occurrenceDao.updateStatus(occ.id, OccurrenceStatus.MISSED, null)
+                }
+                occurrenceDao.updateHourlyReminder(occ.id, active = false, nextReminderMillis = null)
+                AlarmHelper.cancelHourlyReminderAlarm(context, occ.id)
+                AlarmHelper.cancelHourlyReminderNotification(context, occ.id)
+            } else {
+                val targetMillis = occ.nextReminderMillis
+                if (targetMillis == null || targetMillis <= now) {
+                    triggerHourlyReminder(occ.id)
+                } else {
+                    AlarmHelper.scheduleHourlyReminderAlarm(context, occ.id, targetMillis)
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -341,6 +496,8 @@ class TaskRepository(
     /** Deletes single occurrence. If it belongs to a one-time task, deactivates the template to release its color. */
     suspend fun deleteOccurrence(occurrence: TaskOccurrence) {
         AlarmHelper.cancelAlarm(context, occurrence.id)
+        AlarmHelper.cancelHourlyReminderAlarm(context, occurrence.id)
+        AlarmHelper.cancelHourlyReminderNotification(context, occurrence.id)
         occurrenceDao.deleteById(occurrence.id)
         val template = templateDao.getById(occurrence.templateId)
         if (template != null && template.recurrenceType == RecurrenceType.ONE_TIME) {
@@ -361,6 +518,8 @@ class TaskRepository(
         val today = todayString()
         occurrenceDao.findByTemplateAndDate(templateId, today)?.let {
             AlarmHelper.cancelAlarm(context, it.id)
+            AlarmHelper.cancelHourlyReminderAlarm(context, it.id)
+            AlarmHelper.cancelHourlyReminderNotification(context, it.id)
         }
         occurrenceDao.deleteFuturePendingOccurrences(templateId, today)
         templateDao.softDelete(templateId)

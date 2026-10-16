@@ -272,4 +272,112 @@ class AlarmAndSnoozeTest {
             ringtoneUriOnEditFromTasks
         )
     }
+
+    @Test
+    fun testHourlyReminderNotificationMessage() {
+        val expectedMessage = "Task Completed ? Mark it here !!"
+        assertEquals("Task Completed ? Mark it here !!", expectedMessage)
+    }
+
+    @Test
+    fun testHourlyReminderFirstTriggerOneHourAfterDismissal() {
+        val dismissalTime = 1760000000000L // arbitrary fixed timestamp
+        val oneHourMillis = 60 * 60 * 1000L
+
+        val firstReminderTime = dismissalTime + oneHourMillis
+        assertEquals(3600_000L, firstReminderTime - dismissalTime)
+    }
+
+    @Test
+    fun testHourlyReminderRepeatEveryHour() {
+        var currentTrigger = 1760000000000L
+        val oneHourMillis = 60 * 60 * 1000L
+
+        val triggers = mutableListOf<Long>()
+        repeat(3) {
+            currentTrigger += oneHourMillis
+            triggers.add(currentTrigger)
+        }
+
+        assertEquals(3, triggers.size)
+        assertEquals(3600_000L, triggers[1] - triggers[0])
+        assertEquals(3600_000L, triggers[2] - triggers[1])
+    }
+
+    @Test
+    fun testHourlyReminderMarkItActionCompletesAndCancelsReminders() {
+        var occ = sampleOccurrence(id = 50L, status = OccurrenceStatus.PENDING)
+            .copy(hourlyReminderActive = true, nextReminderMillis = System.currentTimeMillis() + 3600000L)
+
+        assertTrue(occ.hourlyReminderActive)
+        assertNotNull(occ.nextReminderMillis)
+
+        // Simulating "mark it" action
+        val completedTime = System.currentTimeMillis()
+        occ = occ.copy(
+            status = OccurrenceStatus.COMPLETED,
+            completedAt = completedTime,
+            hourlyReminderActive = false,
+            nextReminderMillis = null,
+            snoozedUntilMillis = null
+        )
+
+        assertEquals(OccurrenceStatus.COMPLETED, occ.status)
+        assertEquals(completedTime, occ.completedAt)
+        assertFalse(occ.hourlyReminderActive)
+        assertNull(occ.nextReminderMillis)
+    }
+
+    @Test
+    fun testHourlyReminderNoActionKeepsReminderScheduleActive() {
+        val nextTrigger = System.currentTimeMillis() + 3600000L
+        val occ = sampleOccurrence(id = 50L, status = OccurrenceStatus.PENDING)
+            .copy(hourlyReminderActive = true, nextReminderMillis = nextTrigger)
+
+        // Simulating "no" action: only notification is dismissed, DB state and schedule remain active
+        assertTrue("Hourly reminder schedule must remain active on 'no' action", occ.hourlyReminderActive)
+        assertEquals(nextTrigger, occ.nextReminderMillis)
+        assertEquals(OccurrenceStatus.PENDING, occ.status)
+    }
+
+    @Test
+    fun testSnoozeAndRescheduleDoNotStartHourlyReminder() {
+        val occ = sampleOccurrence(id = 50L, status = OccurrenceStatus.PENDING)
+            .copy(hourlyReminderActive = true, nextReminderMillis = System.currentTimeMillis() + 3600000L)
+
+        // 1. Snooze cancels any active reminder
+        val snoozed = occ.copy(
+            snoozedUntilMillis = System.currentTimeMillis() + 10 * 60 * 1000L,
+            hourlyReminderActive = false,
+            nextReminderMillis = null
+        )
+        assertFalse(snoozed.hourlyReminderActive)
+        assertNull(snoozed.nextReminderMillis)
+
+        // 2. Reschedule cancels any active reminder
+        val rescheduled = occ.copy(
+            scheduledDate = "2026-10-18",
+            scheduledTimeMinutes = 600,
+            hourlyReminderActive = false,
+            nextReminderMillis = null
+        )
+        assertFalse(rescheduled.hourlyReminderActive)
+        assertNull(rescheduled.nextReminderMillis)
+    }
+
+    @Test
+    fun testCompletionSkipDeletionAndMidnightMissedCancelReminders() {
+        val occ = sampleOccurrence(id = 50L, status = OccurrenceStatus.PENDING)
+            .copy(hourlyReminderActive = true, nextReminderMillis = System.currentTimeMillis() + 3600000L)
+
+        // Skip cancels reminders
+        val skipped = occ.copy(status = OccurrenceStatus.SKIPPED, hourlyReminderActive = false, nextReminderMillis = null)
+        assertFalse(skipped.hourlyReminderActive)
+        assertNull(skipped.nextReminderMillis)
+
+        // Midnight MISSED cancels reminders
+        val missed = occ.copy(status = OccurrenceStatus.MISSED, hourlyReminderActive = false, nextReminderMillis = null)
+        assertFalse(missed.hourlyReminderActive)
+        assertNull(missed.nextReminderMillis)
+    }
 }

@@ -45,5 +45,9 @@ data class TaskOccurrence(
     /** Epoch millis; set when snoozed, clears when dismissed/fired */
     val snoozedUntilMillis: Long? = null,
     /** Snapshot of custom audio URI string, null for system default alarm tone */
-    val ringtoneUri: String? = null
+    val ringtoneUri: String? = null,
+    /** Whether hourly completion reminders are active after alarm dismissal */
+    val hourlyReminderActive: Boolean = false,
+    /** Next scheduled epoch millis for the hourly follow-up reminder */
+    val nextReminderMillis: Long? = null
 )

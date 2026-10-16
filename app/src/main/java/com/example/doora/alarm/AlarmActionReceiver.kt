@@ -27,6 +27,7 @@ class AlarmActionReceiver : BroadcastReceiver() {
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
                         app.repository.clearSnooze(occurrenceId)
+                        app.repository.startHourlyReminder(occurrenceId)
                     } finally {
                         pendingResult.finish()
                     }
@@ -43,6 +44,22 @@ class AlarmActionReceiver : BroadcastReceiver() {
                         pendingResult.finish()
                     }
                 }
+            }
+            AlarmHelper.ACTION_MARK_COMPLETED -> {
+                val app = context.applicationContext as? DooraApplication ?: return
+                AlarmHelper.cancelHourlyReminderNotification(context, occurrenceId)
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        app.repository.completeOccurrence(occurrenceId)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            }
+            AlarmHelper.ACTION_REMINDER_NO -> {
+                // Dismiss only the current notification. Keep the hourly reminder schedule active.
+                AlarmHelper.cancelHourlyReminderNotification(context, occurrenceId)
             }
         }
     }

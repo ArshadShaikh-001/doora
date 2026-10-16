@@ -17,6 +17,7 @@ import java.util.Locale
 object AlarmHelper {
 
     const val CHANNEL_ID = "doora_alarm_channel"
+    const val REMINDER_CHANNEL_ID = "doora_reminder_channel"
     const val EXTRA_OCCURRENCE_ID = "extra_occurrence_id"
     const val EXTRA_TASK_TITLE = "extra_task_title"
     const val EXTRA_TASK_COLOR = "extra_task_color"
@@ -28,6 +29,8 @@ object AlarmHelper {
 
     const val ACTION_DISMISS = "com.example.doora.ACTION_DISMISS_ALARM"
     const val ACTION_SNOOZE = "com.example.doora.ACTION_SNOOZE_ALARM"
+    const val ACTION_MARK_COMPLETED = "com.example.doora.ACTION_REMINDER_MARK_COMPLETED"
+    const val ACTION_REMINDER_NO = "com.example.doora.ACTION_REMINDER_NO"
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -52,8 +55,19 @@ object AlarmHelper {
                 setBypassDnd(true)
             }
 
+            val reminderChannel = NotificationChannel(
+                REMINDER_CHANNEL_ID,
+                "Task Follow-up Reminders",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Hourly follow-up reminders for uncompleted tasks"
+                enableVibration(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             notificationManager?.createNotificationChannel(channel)
+            notificationManager?.createNotificationChannel(reminderChannel)
         }
     }
 
@@ -151,5 +165,64 @@ object AlarmHelper {
             alarmManager.cancel(pendingIntent)
             pendingIntent.cancel()
         }
+    }
+
+    /**
+     * Schedules exact alarm for an hourly follow-up reminder.
+     * Overwrites any prior pending reminder for this occurrence.
+     */
+    fun scheduleHourlyReminderAlarm(context: Context, occurrenceId: Long, triggerAtMillis: Long) {
+        cancelHourlyReminderAlarm(context, occurrenceId)
+        val now = System.currentTimeMillis()
+        if (triggerAtMillis <= now) return
+
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val intent = Intent(context, HourlyReminderReceiver::class.java).apply {
+            putExtra(EXTRA_OCCURRENCE_ID, occurrenceId)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            occurrenceId.toInt() + 400000,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+            }
+        } catch (_: SecurityException) {
+            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+        }
+    }
+
+    /**
+     * Cancels any scheduled hourly reminder alarm for the given occurrence id.
+     */
+    fun cancelHourlyReminderAlarm(context: Context, occurrenceId: Long) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val intent = Intent(context, HourlyReminderReceiver::class.java).apply {
+            putExtra(EXTRA_OCCURRENCE_ID, occurrenceId)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            occurrenceId.toInt() + 400000,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+    }
+
+    /**
+     * Cancels any active hourly reminder notification posted for the given occurrence id.
+     */
+    fun cancelHourlyReminderNotification(context: Context, occurrenceId: Long) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        nm?.cancel(occurrenceId.toInt() + 500000)
     }
 }

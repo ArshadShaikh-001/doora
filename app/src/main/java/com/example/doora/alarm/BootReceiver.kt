@@ -27,6 +27,8 @@ class BootReceiver : BroadcastReceiver() {
                 app.repository.processDayTransition()
                 // Then reschedule future alarms (does not create catch-up alarms for past)
                 app.repository.rescheduleAllFutureAlarms()
+                // Reconcile active hourly reminders
+                app.repository.reconcileActiveReminders()
             } finally {
                 pendingResult.finish()
             }

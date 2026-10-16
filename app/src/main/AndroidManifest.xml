@@ -50,6 +50,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".alarm.HourlyReminderReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".alarm.BootReceiver"
             android:exported="true">
             <intent-filter>
