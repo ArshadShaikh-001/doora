@@ -22,6 +22,9 @@ object AlarmHelper {
     const val EXTRA_TASK_COLOR = "extra_task_color"
     const val EXTRA_TASK_PRIORITY = "extra_task_priority"
     const val EXTRA_TASK_TIME = "extra_task_time"
+    const val EXTRA_TASK_DATE = "extra_task_date"
+    const val EXTRA_SNOOZE_MINUTES = "extra_snooze_minutes"
+    const val EXTRA_TASK_RINGTONE_URI = "extra_task_ringtone_uri"
 
     const val ACTION_DISMISS = "com.example.doora.ACTION_DISMISS_ALARM"
     const val ACTION_SNOOZE = "com.example.doora.ACTION_SNOOZE_ALARM"
@@ -56,10 +59,12 @@ object AlarmHelper {
 
     /**
      * Calculates trigger epoch millis for a task occurrence.
-     * Uses [snoozedUntilMillis] if active, otherwise computes from scheduledDate + scheduledTimeMinutes.
+     * Uses [snoozedUntilMillis] only if active and strictly in the future,
+     * otherwise computes from scheduledDate + scheduledTimeMinutes.
      */
     fun computeTriggerMillis(occurrence: TaskOccurrence): Long {
-        if (occurrence.snoozedUntilMillis != null && occurrence.snoozedUntilMillis > 0L) {
+        val now = System.currentTimeMillis()
+        if (occurrence.snoozedUntilMillis != null && occurrence.snoozedUntilMillis > now) {
             return occurrence.snoozedUntilMillis
         }
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -76,9 +81,13 @@ object AlarmHelper {
 
     /**
      * Schedules exact alarm for the given task occurrence.
+     * Cancels any prior PendingIntent first to avoid stale or duplicate alarms.
      * If trigger time is in the past, no alarm is scheduled.
      */
     fun scheduleAlarm(context: Context, occurrence: TaskOccurrence) {
+        // Cancel any existing alarm before scheduling to prevent duplicates
+        cancelAlarm(context, occurrence.id)
+
         val triggerAtMillis = computeTriggerMillis(occurrence)
         val now = System.currentTimeMillis()
 
@@ -94,6 +103,8 @@ object AlarmHelper {
             putExtra(EXTRA_TASK_COLOR, occurrence.color)
             putExtra(EXTRA_TASK_PRIORITY, occurrence.priority.name)
             putExtra(EXTRA_TASK_TIME, occurrence.scheduledTimeMinutes)
+            putExtra(EXTRA_TASK_DATE, occurrence.scheduledDate)
+            putExtra(EXTRA_TASK_RINGTONE_URI, occurrence.ringtoneUri)
         }
 
         val pendingIntent = PendingIntent.getBroadcast(
@@ -134,7 +145,7 @@ object AlarmHelper {
             context,
             occurrenceId.toInt(),
             intent,
-            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         if (pendingIntent != null) {
             alarmManager.cancel(pendingIntent)

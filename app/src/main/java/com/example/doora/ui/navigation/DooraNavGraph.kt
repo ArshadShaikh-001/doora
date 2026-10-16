@@ -153,17 +153,21 @@ fun DooraNavGraph(
             composable(Screen.Streaks.route) {
                 StreaksScreen(
                     repository = repository,
-                    onNavigateToAddTask = { navController.navigate("add_task?recurrence=DAILY") }
+                    onNavigateToAddTask = { navController.navigate("add_task?recurrence=DAILY&fromStreaks=true") }
                 )
             }
 
             composable(
-                route = "add_task?recurrence={recurrence}",
+                route = "add_task?recurrence={recurrence}&fromStreaks={fromStreaks}",
                 arguments = listOf(
                     navArgument("recurrence") {
                         type = NavType.StringType
                         nullable = true
                         defaultValue = null
+                    },
+                    navArgument("fromStreaks") {
+                        type = NavType.BoolType
+                        defaultValue = false
                     }
                 ),
                 enterTransition = {
@@ -186,6 +190,7 @@ fun DooraNavGraph(
                 }
             ) { backStackEntry ->
                 val recurrenceArg = backStackEntry.arguments?.getString("recurrence")
+                val isFromStreaks = backStackEntry.arguments?.getBoolean("fromStreaks") ?: false
                 val initialRecurrence = when (recurrenceArg) {
                     "DAILY", "EVERY_DAY" -> RecurrenceType.DAILY
                     else -> null
@@ -194,13 +199,20 @@ fun DooraNavGraph(
                     repository = repository,
                     occurrenceId = null,
                     initialRecurrence = initialRecurrence,
+                    allowCustomRingtone = isFromStreaks,
                     onBack = { navController.popBackStack() }
                 )
             }
 
             composable(
-                route = "edit_task/{occurrenceId}",
-                arguments = listOf(navArgument("occurrenceId") { type = NavType.LongType }),
+                route = "edit_task/{occurrenceId}?fromStreaks={fromStreaks}",
+                arguments = listOf(
+                    navArgument("occurrenceId") { type = NavType.LongType },
+                    navArgument("fromStreaks") {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    }
+                ),
                 enterTransition = {
                     slideIntoContainer(
                         towards = AnimatedContentTransitionScope.SlideDirection.Up,
@@ -221,9 +233,11 @@ fun DooraNavGraph(
                 }
             ) { backStackEntry ->
                 val occurrenceId = backStackEntry.arguments?.getLong("occurrenceId")
+                val isFromStreaks = backStackEntry.arguments?.getBoolean("fromStreaks") ?: false
                 AddEditTaskScreen(
                     repository = repository,
                     occurrenceId = occurrenceId,
+                    allowCustomRingtone = isFromStreaks,
                     onBack = { navController.popBackStack() }
                 )
             }

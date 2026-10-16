@@ -40,6 +40,9 @@ data class AddEditTaskUiState(
     val editScope: EditScope = EditScope.ONLY_TODAY,
     val originalOccurrence: TaskOccurrence? = null,
     val originalTemplate: TaskTemplate? = null,
+    val ringtoneUri: String? = null,
+    val ringtoneTitle: String? = null,
+    val allowCustomRingtone: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
     val saveSuccess: Boolean = false
@@ -48,12 +51,14 @@ data class AddEditTaskUiState(
 class AddEditTaskViewModel(
     private val repository: TaskRepository,
     private val occurrenceId: Long?,
-    private val initialRecurrence: RecurrenceType? = null
+    private val initialRecurrence: RecurrenceType? = null,
+    private val allowCustomRingtone: Boolean = false
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
         AddEditTaskUiState(
-            recurrenceType = initialRecurrence ?: RecurrenceType.ONE_TIME
+            recurrenceType = initialRecurrence ?: RecurrenceType.ONE_TIME,
+            allowCustomRingtone = allowCustomRingtone
         )
     )
     val state: StateFlow<AddEditTaskUiState> = _state.asStateFlow()
@@ -81,6 +86,8 @@ class AddEditTaskViewModel(
                         ?.filter { it.isNotBlank() }
                         ?: emptyList()
 
+                    val currentRingtoneUri = occurrence.ringtoneUri ?: template?.ringtoneUri
+
                     _state.update {
                         it.copy(
                             title = occurrence.title,
@@ -93,6 +100,7 @@ class AddEditTaskViewModel(
                             dayOfMonth = template?.dayOfMonth ?: 1,
                             specificDates = specificDatesList,
                             usedColors = usedColors,
+                            ringtoneUri = currentRingtoneUri,
                             isEditMode = true,
                             isRecurringTask = isRecurring,
                             editScope = if (isRecurring) EditScope.ONLY_TODAY else EditScope.REPEAT,
@@ -122,6 +130,7 @@ class AddEditTaskViewModel(
     fun updateDate(v: String) { _state.update { it.copy(date = v, error = null) } }
     fun updateTime(minutes: Int) { _state.update { it.copy(timeMinutes = minutes, error = null) } }
     fun updatePriority(v: Priority) { _state.update { it.copy(priority = v) } }
+    fun updateRingtone(uri: String?, title: String?) { _state.update { it.copy(ringtoneUri = uri, ringtoneTitle = title) } }
     fun updateColor(v: Int) {
         val s = _state.value
         if (v !in s.usedColors) {
@@ -175,6 +184,12 @@ class AddEditTaskViewModel(
         val weekdaysString = s.selectedWeekdays.sorted().joinToString(",")
         val specificDatesString = s.specificDates.joinToString(",")
 
+        val ringtoneUriToSave = if (s.allowCustomRingtone) {
+            s.ringtoneUri
+        } else {
+            if (s.isEditMode) (s.originalOccurrence?.ringtoneUri ?: s.originalTemplate?.ringtoneUri) else null
+        }
+
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             val result = if (s.isEditMode && s.originalOccurrence != null) {
@@ -185,7 +200,8 @@ class AddEditTaskViewModel(
                         title = s.title.trim(),
                         timeMinutes = s.timeMinutes,
                         priority = s.priority,
-                        color = s.color
+                        color = s.color,
+                        ringtoneUri = ringtoneUriToSave
                     )
                 } else if (s.originalTemplate != null) {
                     // Modify recurring template & future occurrences
@@ -198,7 +214,8 @@ class AddEditTaskViewModel(
                         recurrenceType = s.recurrenceType,
                         weekdays = weekdaysString,
                         dayOfMonth = s.dayOfMonth,
-                        specificDates = specificDatesString
+                        specificDates = specificDatesString,
+                        ringtoneUri = ringtoneUriToSave
                     )
                 } else {
                     repository.updateOccurrenceOnly(
@@ -206,7 +223,8 @@ class AddEditTaskViewModel(
                         title = s.title.trim(),
                         timeMinutes = s.timeMinutes,
                         priority = s.priority,
-                        color = s.color
+                        color = s.color,
+                        ringtoneUri = ringtoneUriToSave
                     )
                 }
             } else {
@@ -217,7 +235,8 @@ class AddEditTaskViewModel(
                         date = s.date,
                         timeMinutes = s.timeMinutes,
                         priority = s.priority,
-                        color = s.color
+                        color = s.color,
+                        ringtoneUri = ringtoneUriToSave
                     )
                 } else {
                     repository.addRecurringTask(
@@ -229,7 +248,8 @@ class AddEditTaskViewModel(
                         color = s.color,
                         weekdays = weekdaysString,
                         dayOfMonth = s.dayOfMonth,
-                        specificDates = specificDatesString
+                        specificDates = specificDatesString,
+                        ringtoneUri = ringtoneUriToSave
                     )
                 }
             }
@@ -244,10 +264,11 @@ class AddEditTaskViewModel(
     class Factory(
         private val repo: TaskRepository,
         private val occurrenceId: Long?,
-        private val initialRecurrence: RecurrenceType? = null
+        private val initialRecurrence: RecurrenceType? = null,
+        private val allowCustomRingtone: Boolean = false
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            AddEditTaskViewModel(repo, occurrenceId, initialRecurrence) as T
+            AddEditTaskViewModel(repo, occurrenceId, initialRecurrence, allowCustomRingtone) as T
     }
 }

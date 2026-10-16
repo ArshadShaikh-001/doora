@@ -22,14 +22,23 @@ class AlarmActionReceiver : BroadcastReceiver() {
 
         when (intent.action) {
             AlarmHelper.ACTION_DISMISS -> {
-                // Task remains PENDING as required
-            }
-            AlarmHelper.ACTION_SNOOZE -> {
                 val app = context.applicationContext as? DooraApplication ?: return
                 val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        app.repository.snoozeOccurrence(occurrenceId, 10)
+                        app.repository.clearSnooze(occurrenceId)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            }
+            AlarmHelper.ACTION_SNOOZE -> {
+                val minutes = intent.getIntExtra(AlarmHelper.EXTRA_SNOOZE_MINUTES, 10)
+                val app = context.applicationContext as? DooraApplication ?: return
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        app.repository.snoozeOccurrence(occurrenceId, minutes)
                     } finally {
                         pendingResult.finish()
                     }

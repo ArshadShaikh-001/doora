@@ -104,7 +104,8 @@ class TaskRepository(
                             priority = template.priority,
                             color = template.color,
                             scheduledDate = today,
-                            scheduledTimeMinutes = template.scheduledTimeMinutes
+                            scheduledTimeMinutes = template.scheduledTimeMinutes,
+                            ringtoneUri = template.ringtoneUri
                         )
                         val insertedId = occurrenceDao.insert(occ)
                         val createdOcc = occ.copy(id = insertedId)
@@ -130,7 +131,8 @@ class TaskRepository(
                             priority = template.priority,
                             color = template.color,
                             scheduledDate = dateStr,
-                            scheduledTimeMinutes = template.scheduledTimeMinutes
+                            scheduledTimeMinutes = template.scheduledTimeMinutes,
+                            ringtoneUri = template.ringtoneUri
                         )
                         val id = occurrenceDao.insert(occ)
                         if (dateStr == todayString()) {
@@ -155,6 +157,12 @@ class TaskRepository(
         excludeOccurrenceId: Long = -1L
     ): Boolean = occurrenceDao.findConflict(date, timeMinutes, excludeOccurrenceId) != null
 
+    suspend fun findConflict(
+        date: String,
+        timeMinutes: Int,
+        excludeOccurrenceId: Long = -1L
+    ): TaskOccurrence? = occurrenceDao.findConflict(date, timeMinutes, excludeOccurrenceId)
+
     // ---------------------------------------------------------------------------
     // Mutations — Add
     // ---------------------------------------------------------------------------
@@ -164,7 +172,8 @@ class TaskRepository(
         date: String,
         timeMinutes: Int,
         priority: Priority,
-        color: Int
+        color: Int,
+        ringtoneUri: String? = null
     ): Result<Unit> = runCatching {
         if (hasTimeConflict(date, timeMinutes)) error("A task already exists at this time on $date")
         if (color in getUsedColors()) error("Color is already in use by another active task")
@@ -175,7 +184,8 @@ class TaskRepository(
                 color = color,
                 recurrenceType = RecurrenceType.ONE_TIME,
                 scheduledTimeMinutes = timeMinutes,
-                startDate = date
+                startDate = date,
+                ringtoneUri = ringtoneUri
             )
         )
         val occurrence = TaskOccurrence(
@@ -184,7 +194,8 @@ class TaskRepository(
             priority = priority,
             color = color,
             scheduledDate = date,
-            scheduledTimeMinutes = timeMinutes
+            scheduledTimeMinutes = timeMinutes,
+            ringtoneUri = ringtoneUri
         )
         val occurrenceId = occurrenceDao.insert(occurrence)
         AlarmHelper.scheduleAlarm(context, occurrence.copy(id = occurrenceId))
@@ -199,7 +210,8 @@ class TaskRepository(
         color: Int,
         weekdays: String = "",
         dayOfMonth: Int = 1,
-        specificDates: String = ""
+        specificDates: String = "",
+        ringtoneUri: String? = null
     ): Result<Unit> = runCatching {
         val today = todayString()
         if (startDate == today && hasTimeConflict(today, timeMinutes)) {
@@ -216,7 +228,8 @@ class TaskRepository(
             startDate = startDate,
             weekdays = weekdays,
             dayOfMonth = dayOfMonth,
-            specificDates = specificDates
+            specificDates = specificDates,
+            ringtoneUri = ringtoneUri
         )
         val templateId = templateDao.insert(template)
         val savedTemplate = template.copy(id = templateId)
@@ -229,7 +242,8 @@ class TaskRepository(
                 priority = priority,
                 color = color,
                 scheduledDate = today,
-                scheduledTimeMinutes = timeMinutes
+                scheduledTimeMinutes = timeMinutes,
+                ringtoneUri = ringtoneUri
             )
             val occurrenceId = occurrenceDao.insert(occurrence)
             AlarmHelper.scheduleAlarm(context, occurrence.copy(id = occurrenceId))
@@ -259,6 +273,65 @@ class TaskRepository(
         if (occ != null) {
             AlarmHelper.scheduleAlarm(context, occ.copy(snoozedUntilMillis = snoozedUntil))
         }
+    }
+
+    suspend fun clearSnooze(id: Long) {
+        occurrenceDao.updateSnooze(id, null)
+    }
+
+    suspend fun markMissed(id: Long) {
+        occurrenceDao.updateStatus(id, OccurrenceStatus.MISSED, null)
+        occurrenceDao.updateSnooze(id, null)
+        AlarmHelper.cancelAlarm(context, id)
+    }
+
+    /**
+     * Reschedules a single task occurrence to a new date and time.
+     * Validates that the target date/time is in the future and has no conflicts.
+     * Updates only this occurrence snapshot; recurring series templates remain unmodified.
+     */
+    suspend fun rescheduleOccurrence(
+        occurrenceId: Long,
+        newDate: String,
+        newTimeMinutes: Int
+    ): Result<Unit> = runCatching {
+        if (newTimeMinutes !in 0..1439) {
+            error("Invalid time")
+        }
+
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val parsedDate = sdf.parse(newDate) ?: error("Invalid date format: $newDate")
+        val cal = java.util.Calendar.getInstance().apply {
+            time = parsedDate
+            set(java.util.Calendar.HOUR_OF_DAY, newTimeMinutes / 60)
+            set(java.util.Calendar.MINUTE, newTimeMinutes % 60)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val targetMillis = cal.timeInMillis
+        if (targetMillis <= System.currentTimeMillis()) {
+            error("Cannot reschedule to a past time. Please select a future time.")
+        }
+
+        val conflict = findConflict(newDate, newTimeMinutes, occurrenceId)
+        if (conflict != null) {
+            val formattedTime = com.example.doora.ui.components.formatTime(newTimeMinutes)
+            error("A task (\"${conflict.title}\") already exists at $formattedTime on $newDate")
+        }
+
+        val occurrence = occurrenceDao.findById(occurrenceId) ?: error("Task occurrence not found")
+
+        val updated = occurrence.copy(
+            scheduledDate = newDate,
+            scheduledTimeMinutes = newTimeMinutes,
+            snoozedUntilMillis = null,
+            status = OccurrenceStatus.PENDING
+        )
+        occurrenceDao.update(updated)
+
+        // Cancel previous alarm and schedule the new alarm
+        AlarmHelper.cancelAlarm(context, occurrenceId)
+        AlarmHelper.scheduleAlarm(context, updated)
     }
 
     // ---------------------------------------------------------------------------
@@ -305,7 +378,8 @@ class TaskRepository(
         title: String,
         timeMinutes: Int,
         priority: Priority,
-        color: Int
+        color: Int,
+        ringtoneUri: String? = occurrence.ringtoneUri
     ): Result<Unit> = runCatching {
         if (hasTimeConflict(occurrence.scheduledDate, timeMinutes, occurrence.id)) {
             error("A task already exists at this time on ${occurrence.scheduledDate}")
@@ -317,7 +391,8 @@ class TaskRepository(
             title = title,
             scheduledTimeMinutes = timeMinutes,
             priority = priority,
-            color = color
+            color = color,
+            ringtoneUri = ringtoneUri
         )
         occurrenceDao.update(updated)
         AlarmHelper.cancelAlarm(context, occurrence.id)
@@ -339,7 +414,8 @@ class TaskRepository(
         recurrenceType: RecurrenceType,
         weekdays: String = "",
         dayOfMonth: Int = 1,
-        specificDates: String = ""
+        specificDates: String = "",
+        ringtoneUri: String? = template.ringtoneUri
     ): Result<Unit> = runCatching {
         val today = todayString()
         val currentOcc = occurrenceDao.findByTemplateAndDate(template.id, today)
@@ -358,7 +434,8 @@ class TaskRepository(
             scheduledTimeMinutes = timeMinutes,
             weekdays = weekdays,
             dayOfMonth = dayOfMonth,
-            specificDates = specificDates
+            specificDates = specificDates,
+            ringtoneUri = ringtoneUri
         )
         templateDao.update(updatedTemplate)
 
@@ -368,7 +445,8 @@ class TaskRepository(
                 title = title,
                 priority = priority,
                 color = color,
-                scheduledTimeMinutes = timeMinutes
+                scheduledTimeMinutes = timeMinutes,
+                ringtoneUri = ringtoneUri
             )
             occurrenceDao.update(updatedOcc)
             AlarmHelper.cancelAlarm(context, currentOcc.id)

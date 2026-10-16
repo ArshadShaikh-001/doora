@@ -30,9 +30,20 @@ class AlarmReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
+                // If occurrence belongs to a past day and snooze is not actively in the future, mark MISSED
+                val today = app.repository.todayString()
+                val now = System.currentTimeMillis()
+                if (occurrence.scheduledDate < today &&
+                    (occurrence.snoozedUntilMillis == null || occurrence.snoozedUntilMillis <= now)
+                ) {
+                    app.repository.markMissed(occurrence.id)
+                    return@launch
+                }
+
                 // 1. Build Full-Screen Intent for AlarmActivity
                 val fullScreenIntent = Intent(context, AlarmActivity::class.java).apply {
                     putExtras(intent)
+                    putExtra(AlarmHelper.EXTRA_TASK_RINGTONE_URI, occurrence.ringtoneUri)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
                 val fullScreenPendingIntent = PendingIntent.getActivity(
@@ -54,17 +65,20 @@ class AlarmReceiver : BroadcastReceiver() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
-                // 3. Build Snooze Action PendingIntent
-                val snoozeIntent = Intent(context, AlarmActionReceiver::class.java).apply {
-                    action = AlarmHelper.ACTION_SNOOZE
-                    putExtra(AlarmHelper.EXTRA_OCCURRENCE_ID, occurrenceId)
+                // 3. Build Snooze Action PendingIntents (10m and 20m for notification)
+                fun createSnoozeIntent(minutes: Int): PendingIntent {
+                    val snoozeIntent = Intent(context, AlarmActionReceiver::class.java).apply {
+                        action = AlarmHelper.ACTION_SNOOZE
+                        putExtra(AlarmHelper.EXTRA_OCCURRENCE_ID, occurrenceId)
+                        putExtra(AlarmHelper.EXTRA_SNOOZE_MINUTES, minutes)
+                    }
+                    return PendingIntent.getBroadcast(
+                        context,
+                        occurrenceId.toInt() + 300000 + minutes,
+                        snoozeIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
                 }
-                val snoozePendingIntent = PendingIntent.getBroadcast(
-                    context,
-                    occurrenceId.toInt() + 300000,
-                    snoozeIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
 
                 // 4. Build Notification
                 val notification = NotificationCompat.Builder(context, AlarmHelper.CHANNEL_ID)
@@ -79,7 +93,8 @@ class AlarmReceiver : BroadcastReceiver() {
                     .setFullScreenIntent(fullScreenPendingIntent, true)
                     .setContentIntent(fullScreenPendingIntent)
                     .addAction(0, "Dismiss", dismissPendingIntent)
-                    .addAction(0, "Snooze (10m)", snoozePendingIntent)
+                    .addAction(0, "Snooze 10m", createSnoozeIntent(10))
+                    .addAction(0, "Snooze 20m", createSnoozeIntent(20))
                     .build()
 
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager

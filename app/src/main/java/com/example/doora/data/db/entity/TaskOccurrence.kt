@@ -43,5 +43,7 @@ data class TaskOccurrence(
     /** Epoch millis; non-null only when status == COMPLETED */
     val completedAt: Long? = null,
     /** Epoch millis; set when snoozed, clears when dismissed/fired */
-    val snoozedUntilMillis: Long? = null
+    val snoozedUntilMillis: Long? = null,
+    /** Snapshot of custom audio URI string, null for system default alarm tone */
+    val ringtoneUri: String? = null
 )

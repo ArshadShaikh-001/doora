@@ -29,7 +29,9 @@ data class TaskTemplate(
     val specificDates: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     /** Soft-delete flag; false means template recurrence is cancelled */
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    /** Persisted custom audio URI string, null for system default alarm tone */
+    val ringtoneUri: String? = null
 ) {
     val streakStartDate: String
         get() = if (startDate.isNotBlank()) startDate else {

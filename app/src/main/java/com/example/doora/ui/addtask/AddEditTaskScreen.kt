@@ -1,5 +1,14 @@
 package com.example.doora.ui.addtask
 
+import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.RingtoneManager
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -27,6 +36,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +48,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -50,6 +61,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,6 +82,7 @@ import com.example.doora.data.model.RecurrenceType
 import com.example.doora.data.repository.TaskRepository
 import com.example.doora.ui.components.ColorPicker
 import com.example.doora.ui.components.formatTime
+import com.example.doora.ui.theme.GoldPrimary
 import com.example.doora.ui.theme.PriorityHighBg
 import com.example.doora.ui.theme.PriorityHighColor
 import com.example.doora.ui.theme.PriorityLowBg
@@ -88,11 +101,12 @@ fun AddEditTaskScreen(
     repository: TaskRepository,
     occurrenceId: Long?,
     initialRecurrence: RecurrenceType? = null,
+    allowCustomRingtone: Boolean = false,
     onBack: () -> Unit
 ) {
     val vm: AddEditTaskViewModel = viewModel(
-        key = occurrenceId?.toString() ?: "add_${initialRecurrence?.name ?: "default"}",
-        factory = AddEditTaskViewModel.Factory(repository, occurrenceId, initialRecurrence)
+        key = occurrenceId?.toString() ?: "add_${initialRecurrence?.name ?: "default"}_$allowCustomRingtone",
+        factory = AddEditTaskViewModel.Factory(repository, occurrenceId, initialRecurrence, allowCustomRingtone)
     )
     val state by vm.state.collectAsState()
 
@@ -105,6 +119,87 @@ fun AddEditTaskScreen(
                 UiFeedbackHelper.playTaskCreatedFeedback(context)
             }
             onBack()
+        }
+    }
+
+    var isPlayingPreview by remember { mutableStateOf(false) }
+    var previewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+
+    fun stopPreview() {
+        try {
+            previewPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.reset()
+                it.release()
+            }
+        } catch (_: Exception) {}
+        previewPlayer = null
+        isPlayingPreview = false
+    }
+
+    fun startPreview(uriString: String?) {
+        stopPreview()
+        try {
+            val player = MediaPlayer()
+            val uri = if (!uriString.isNullOrBlank()) {
+                Uri.parse(uriString)
+            } else {
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            }
+            if (uri != null) {
+                player.setDataSource(context, uri)
+                player.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                player.setOnCompletionListener {
+                    stopPreview()
+                }
+                player.prepare()
+                player.start()
+                previewPlayer = player
+                isPlayingPreview = true
+            }
+        } catch (_: Exception) {
+            stopPreview()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            stopPreview()
+        }
+    }
+
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+            val fileName = queryAudioFileName(context, uri)
+            vm.updateRingtone(uri.toString(), fileName)
+            stopPreview()
+        }
+    }
+
+    val displaySoundTitle: String = remember(state.ringtoneUri, state.ringtoneTitle) {
+        val title = state.ringtoneTitle
+        val uriStr = state.ringtoneUri
+        when {
+            !title.isNullOrBlank() -> title
+            !uriStr.isNullOrBlank() -> {
+                val parsedUri = runCatching { Uri.parse(uriStr) }.getOrNull()
+                (if (parsedUri != null) queryAudioFileName(context, parsedUri) else null) ?: "Custom Audio File"
+            }
+            else -> "Default Alarm Sound"
         }
     }
 
@@ -475,6 +570,117 @@ fun AddEditTaskScreen(
                 }
             }
 
+            // Alarm Sound Selection (Only available when allowCustomRingtone is true, e.g. from Streaks)
+            if (allowCustomRingtone) {
+                Column {
+                    Text(
+                        text = "ALARM SOUND",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f, fill = false)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Notifications,
+                                        contentDescription = null,
+                                        tint = if (state.ringtoneUri != null) GoldPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = displaySoundTitle,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = if (state.ringtoneUri != null) "Custom Audio File" else "Default System Alarm",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Button(
+                                    onClick = { audioPickerLauncher.launch(arrayOf("audio/*")) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = if (state.ringtoneUri != null) "Change" else "Choose",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        if (isPlayingPreview) {
+                                            stopPreview()
+                                        } else {
+                                            startPreview(state.ringtoneUri)
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = if (isPlayingPreview) "■  Stop Preview" else "▶  Preview Sound",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+
+                                if (state.ringtoneUri != null) {
+                                    TextButton(
+                                        onClick = {
+                                            stopPreview()
+                                            vm.updateRingtone(null, null)
+                                        },
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text(
+                                            text = "Reset to Default",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Color Palette
             Column {
                 Text(
@@ -603,3 +809,20 @@ private fun formatDisplayDate(dateStr: String): String {
         dateStr
     }
 }
+
+private fun queryAudioFileName(context: Context, uri: Uri): String? {
+    var name: String? = null
+    try {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex != -1 && cursor.moveToFirst()) {
+                name = cursor.getString(nameIndex)
+            }
+        }
+    } catch (_: Exception) {}
+    if (name.isNullOrBlank()) {
+        name = uri.lastPathSegment?.substringAfterLast('/')
+    }
+    return name
+}
+
