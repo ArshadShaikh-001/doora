@@ -328,33 +328,80 @@ object StreakAndStatsEngine {
         return StreakData(currentStreak, longestStreak)
     }
 
+    /**
+     * Filters occurrences to include ONLY those belonging to DAILY recurring task templates.
+     * Non-daily templates (ONE_TIME, WEEKLY, WEEKDAYS, MONTHLY, SPECIFIC_DATES) are excluded.
+     * Occurrences scheduled prior to the template's creation/start date are also excluded.
+     */
+    fun filterDailyOccurrences(
+        occurrences: List<TaskOccurrence>,
+        templates: List<TaskTemplate>
+    ): List<TaskOccurrence> {
+        if (templates.isEmpty()) return occurrences
+        val dailyTemplatesMap = templates
+            .filter { it.recurrenceType == RecurrenceType.DAILY }
+            .associateBy { it.id }
+
+        return occurrences.filter { occ ->
+            val template = dailyTemplatesMap[occ.templateId]
+            template != null && occ.scheduledDate >= template.streakStartDate
+        }
+    }
+
     fun calculateStatistics(
         allOccurrences: List<TaskOccurrence>,
+        templates: List<TaskTemplate>,
         selectedRange: StatsTimeRange,
         todayDateStr: String
     ): StatisticsData {
-        val streakData = calculateStreak(allOccurrences, todayDateStr)
+        val dailyOccurrences = if (templates.isNotEmpty()) {
+            filterDailyOccurrences(allOccurrences, templates)
+        } else {
+            allOccurrences
+        }
+
+        val streakData = if (templates.isNotEmpty()) {
+            val dailyTemplates = templates.filter { it.recurrenceType == RecurrenceType.DAILY }
+            val activeDailyTemplates = dailyTemplates.filter { it.isActive }
+            if (dailyTemplates.isNotEmpty()) {
+                val allDailyStreaks = dailyTemplates.map { template ->
+                    calculateDailyTaskStreak(
+                        template = template,
+                        occurrencesForTemplate = dailyOccurrences.filter { it.templateId == template.id },
+                        todayDateStr = todayDateStr
+                    )
+                }
+                val activeStreaks = allDailyStreaks.filter { s -> activeDailyTemplates.any { it.id == s.templateId } }
+                val curr = activeStreaks.maxOfOrNull { it.currentStreak } ?: 0
+                val longest = allDailyStreaks.maxOfOrNull { it.longestStreak } ?: 0
+                StreakData(curr, longest)
+            } else {
+                StreakData(0, 0)
+            }
+        } else {
+            calculateStreak(dailyOccurrences, todayDateStr)
+        }
 
         // Today metrics
-        val todayTasks = allOccurrences.filter { it.scheduledDate == todayDateStr }
+        val todayTasks = dailyOccurrences.filter { it.scheduledDate == todayDateStr }
         val completedToday = todayTasks.count { it.status == OccurrenceStatus.COMPLETED }
         val totalToday = todayTasks.count { it.status != OccurrenceStatus.SKIPPED }
         val dailyRate = if (totalToday > 0) (completedToday.toFloat() / totalToday) * 100f else 0f
 
         // Weekly metrics (last 7 days)
         val sevenDaysAgo = getDateDaysAgo(todayDateStr, 6)
-        val weekTasks = allOccurrences.filter { it.scheduledDate in sevenDaysAgo..todayDateStr && it.status != OccurrenceStatus.SKIPPED }
+        val weekTasks = dailyOccurrences.filter { it.scheduledDate in sevenDaysAgo..todayDateStr && it.status != OccurrenceStatus.SKIPPED }
         val weekCompleted = weekTasks.count { it.status == OccurrenceStatus.COMPLETED }
         val weeklyRate = if (weekTasks.isNotEmpty()) (weekCompleted.toFloat() / weekTasks.size) * 100f else 0f
 
         // Monthly metrics (current month)
         val currentMonthPrefix = todayDateStr.substring(0, 7) // "yyyy-MM"
-        val monthTasks = allOccurrences.filter { it.scheduledDate.startsWith(currentMonthPrefix) && it.status != OccurrenceStatus.SKIPPED }
+        val monthTasks = dailyOccurrences.filter { it.scheduledDate.startsWith(currentMonthPrefix) && it.status != OccurrenceStatus.SKIPPED }
         val monthCompleted = monthTasks.count { it.status == OccurrenceStatus.COMPLETED }
         val monthlyRate = if (monthTasks.isNotEmpty()) (monthCompleted.toFloat() / monthTasks.size) * 100f else 0f
 
         // Filter for selected range
-        val filteredOccurrences = filterByRange(allOccurrences, selectedRange, todayDateStr)
+        val filteredOccurrences = filterByRange(dailyOccurrences, selectedRange, todayDateStr)
         val rangeNonSkipped = filteredOccurrences.filter { it.status != OccurrenceStatus.SKIPPED }
         val rangeCompleted = rangeNonSkipped.count { it.status == OccurrenceStatus.COMPLETED }
         val rangeRate = if (rangeNonSkipped.isNotEmpty()) (rangeCompleted.toFloat() / rangeNonSkipped.size) * 100f else 0f
@@ -411,6 +458,17 @@ object StreakAndStatsEngine {
             completedByDate = completedByDate
         )
     }
+
+    fun calculateStatistics(
+        allOccurrences: List<TaskOccurrence>,
+        selectedRange: StatsTimeRange,
+        todayDateStr: String
+    ): StatisticsData = calculateStatistics(
+        allOccurrences = allOccurrences,
+        templates = emptyList(),
+        selectedRange = selectedRange,
+        todayDateStr = todayDateStr
+    )
 
     private fun filterByRange(
         list: List<TaskOccurrence>,

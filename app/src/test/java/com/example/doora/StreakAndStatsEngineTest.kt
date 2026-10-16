@@ -217,4 +217,225 @@ class StreakAndStatsEngineTest {
         assertEquals(2, stats.totalTasksCompleted)
         assertEquals(1, stats.totalTasksMissed)
     }
+
+    @Test
+    fun testInsights_OnlyDailyTasksContribute_NonDailyExcluded() {
+        val daily = dailyTemplate(1L, "Exercise", "2026-09-20")
+        val oneTime = TaskTemplate(
+            id = 2L,
+            title = "Doctor",
+            priority = Priority.HIGH,
+            color = 0,
+            recurrenceType = RecurrenceType.ONE_TIME,
+            scheduledTimeMinutes = 600,
+            startDate = "2026-09-26",
+            isActive = true
+        )
+        val weekly = TaskTemplate(
+            id = 3L,
+            title = "Laundry",
+            priority = Priority.LOW,
+            color = 0,
+            recurrenceType = RecurrenceType.WEEKLY,
+            scheduledTimeMinutes = 600,
+            startDate = "2026-09-20",
+            isActive = true
+        )
+        val monthly = TaskTemplate(
+            id = 4L,
+            title = "Rent",
+            priority = Priority.HIGH,
+            color = 0,
+            recurrenceType = RecurrenceType.MONTHLY,
+            scheduledTimeMinutes = 600,
+            startDate = "2026-09-01",
+            isActive = true
+        )
+
+        val templates = listOf(daily, oneTime, weekly, monthly)
+        val occurrences = listOf(
+            occ(1L, "Exercise", "2026-09-26", OccurrenceStatus.COMPLETED, templateId = 1L),
+            occ(2L, "Doctor", "2026-09-26", OccurrenceStatus.COMPLETED, templateId = 2L),
+            occ(3L, "Laundry", "2026-09-26", OccurrenceStatus.COMPLETED, templateId = 3L),
+            occ(4L, "Rent", "2026-09-26", OccurrenceStatus.COMPLETED, templateId = 4L)
+        )
+
+        val stats = StreakAndStatsEngine.calculateStatistics(
+            allOccurrences = occurrences,
+            templates = templates,
+            selectedRange = StatsTimeRange.TODAY,
+            todayDateStr = "2026-09-26"
+        )
+
+        // Only the daily task "Exercise" should be counted
+        assertEquals(1, stats.tasksCompletedToday)
+        assertEquals(1, stats.totalTasksToday)
+        assertEquals(100f, stats.dailyCompletionRate, 0.1f)
+        assertEquals(1, stats.totalTasksCompleted)
+        assertEquals("Exercise", stats.mostConsistentTaskTitle)
+        assertEquals(mapOf("2026-09-26" to 1), stats.completedByDate)
+    }
+
+    @Test
+    fun testInsights_OccurrencesBeforeStartDateExcluded() {
+        val coding = dailyTemplate(1L, "Coding", "2026-09-24")
+        val occurrences = listOf(
+            occ(1L, "Coding", "2026-09-22", OccurrenceStatus.MISSED, templateId = 1L), // before start date!
+            occ(2L, "Coding", "2026-09-23", OccurrenceStatus.MISSED, templateId = 1L), // before start date!
+            occ(3L, "Coding", "2026-09-24", OccurrenceStatus.COMPLETED, templateId = 1L),
+            occ(4L, "Coding", "2026-09-25", OccurrenceStatus.COMPLETED, templateId = 1L),
+            occ(5L, "Coding", "2026-09-26", OccurrenceStatus.COMPLETED, templateId = 1L)
+        )
+
+        val stats = StreakAndStatsEngine.calculateStatistics(
+            allOccurrences = occurrences,
+            templates = listOf(coding),
+            selectedRange = StatsTimeRange.ALL_TIME,
+            todayDateStr = "2026-09-26"
+        )
+
+        // The 2 missed occurrences before start date must be ignored completely
+        assertEquals(0, stats.totalTasksMissed)
+        assertEquals(3, stats.totalTasksCompleted)
+        assertEquals(3, stats.currentStreak)
+        assertEquals(3, stats.longestStreak)
+    }
+
+    @Test
+    fun testInsights_StatusCountsRespected() {
+        val t1 = dailyTemplate(1L, "Study", "2026-09-20")
+        val t2 = dailyTemplate(2L, "Read", "2026-09-20")
+        val t3 = dailyTemplate(3L, "Meditate", "2026-09-20")
+        val t4 = dailyTemplate(4L, "Walk", "2026-09-20")
+
+        val occurrences = listOf(
+            occ(1L, "Study", "2026-09-26", OccurrenceStatus.COMPLETED, templateId = 1L),
+            occ(2L, "Read", "2026-09-26", OccurrenceStatus.MISSED, templateId = 2L),
+            occ(3L, "Meditate", "2026-09-26", OccurrenceStatus.SKIPPED, templateId = 3L),
+            occ(4L, "Walk", "2026-09-26", OccurrenceStatus.PENDING, templateId = 4L)
+        )
+
+        val stats = StreakAndStatsEngine.calculateStatistics(
+            allOccurrences = occurrences,
+            templates = listOf(t1, t2, t3, t4),
+            selectedRange = StatsTimeRange.TODAY,
+            todayDateStr = "2026-09-26"
+        )
+
+        assertEquals(1, stats.tasksCompletedToday)
+        // Total tasks today excludes SKIPPED: Completed(1) + Missed(1) + Pending(1) = 3
+        assertEquals(3, stats.totalTasksToday)
+        assertEquals(33.33f, stats.dailyCompletionRate, 0.1f)
+        assertEquals(1, stats.totalTasksCompleted)
+        assertEquals(1, stats.totalTasksMissed)
+        assertEquals(1, stats.totalTasksSkipped)
+        assertEquals("Read", stats.mostFrequentMissedTaskTitle)
+    }
+
+    @Test
+    fun testInsights_DeactivatedDailyTask_PreservesPastOccurrences() {
+        // Soft-deleted daily task
+        val oldHabit = TaskTemplate(
+            id = 1L,
+            title = "Old Habit",
+            priority = Priority.MEDIUM,
+            color = 0,
+            recurrenceType = RecurrenceType.DAILY,
+            scheduledTimeMinutes = 540,
+            startDate = "2026-09-10",
+            isActive = false
+        )
+
+        val occurrences = listOf(
+            occ(1L, "Old Habit", "2026-09-15", OccurrenceStatus.COMPLETED, templateId = 1L)
+        )
+
+        val stats = StreakAndStatsEngine.calculateStatistics(
+            allOccurrences = occurrences,
+            templates = listOf(oldHabit),
+            selectedRange = StatsTimeRange.ALL_TIME,
+            todayDateStr = "2026-09-26"
+        )
+
+        assertEquals(1, stats.totalTasksCompleted)
+        assertEquals("Old Habit", stats.mostConsistentTaskTitle)
+    }
+
+    @Test
+    fun testInsights_StreakConsistencyWithTaskSpecificModel() {
+        val habitA = dailyTemplate(1L, "Habit A", "2026-09-20")
+        val habitB = dailyTemplate(2L, "Habit B", "2026-09-25")
+        val oneTime = TaskTemplate(
+            id = 3L,
+            title = "One Time",
+            priority = Priority.HIGH,
+            color = 0,
+            recurrenceType = RecurrenceType.ONE_TIME,
+            scheduledTimeMinutes = 540,
+            startDate = "2026-09-26",
+            isActive = true
+        )
+
+        val occurrences = mutableListOf<TaskOccurrence>()
+        // Habit A completed 7 days straight (20 to 26 Sep)
+        for (day in 20..26) {
+            occurrences.add(occ(day.toLong(), "Habit A", "2026-09-$day", OccurrenceStatus.COMPLETED, templateId = 1L))
+        }
+        // Habit B missed on 25 Sep
+        occurrences.add(occ(100L, "Habit B", "2026-09-25", OccurrenceStatus.MISSED, templateId = 2L))
+        // One Time missed on 26 Sep
+        occurrences.add(occ(200L, "One Time", "2026-09-26", OccurrenceStatus.MISSED, templateId = 3L))
+
+        val stats = StreakAndStatsEngine.calculateStatistics(
+            allOccurrences = occurrences,
+            templates = listOf(habitA, habitB, oneTime),
+            selectedRange = StatsTimeRange.ALL_TIME,
+            todayDateStr = "2026-09-26"
+        )
+
+        // Habit A has a 7-day streak. Habit B's miss and One Time's miss must not destroy Habit A's streak in Insights.
+        assertEquals(7, stats.currentStreak)
+        assertEquals(7, stats.longestStreak)
+    }
+
+    @Test
+    fun testInsights_AllTimeRangesRespectDailyFilter() {
+        val daily = dailyTemplate(1L, "Habit", "2026-09-01")
+        val weekly = TaskTemplate(
+            id = 2L,
+            title = "Weekly",
+            priority = Priority.LOW,
+            color = 0,
+            recurrenceType = RecurrenceType.WEEKLY,
+            scheduledTimeMinutes = 540,
+            startDate = "2026-09-01",
+            isActive = true
+        )
+
+        val occurrences = listOf(
+            occ(1L, "Habit", "2026-09-26", OccurrenceStatus.COMPLETED, templateId = 1L),
+            occ(2L, "Weekly", "2026-09-26", OccurrenceStatus.COMPLETED, templateId = 2L),
+            occ(3L, "Habit", "2026-09-20", OccurrenceStatus.COMPLETED, templateId = 1L),
+            occ(4L, "Weekly", "2026-09-20", OccurrenceStatus.COMPLETED, templateId = 2L)
+        )
+
+        val templates = listOf(daily, weekly)
+
+        for (range in StatsTimeRange.entries) {
+            val stats = StreakAndStatsEngine.calculateStatistics(
+                allOccurrences = occurrences,
+                templates = templates,
+                selectedRange = range,
+                todayDateStr = "2026-09-26"
+            )
+            // Under no time range should Weekly task be counted
+            assertTrue(stats.mostConsistentTaskTitle != "Weekly")
+            when (range) {
+                StatsTimeRange.TODAY -> assertEquals(1, stats.totalTasksCompleted)
+                StatsTimeRange.LAST_7_DAYS -> assertEquals(2, stats.totalTasksCompleted)
+                StatsTimeRange.ALL_TIME -> assertEquals(2, stats.totalTasksCompleted)
+                else -> {}
+            }
+        }
+    }
 }

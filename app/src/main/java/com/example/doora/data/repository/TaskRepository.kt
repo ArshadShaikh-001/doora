@@ -59,6 +59,9 @@ class TaskRepository(
     fun observeAllTemplates(): Flow<List<TaskTemplate>> =
         templateDao.observeAllTemplates()
 
+    suspend fun getAllTemplates(): List<TaskTemplate> =
+        templateDao.getAllTemplates()
+
     fun observeActiveDailyTemplates(): Flow<List<TaskTemplate>> =
         templateDao.observeActiveTemplates().map { templates ->
             templates.filter { it.recurrenceType == RecurrenceType.DAILY }

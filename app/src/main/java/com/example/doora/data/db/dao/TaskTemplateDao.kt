@@ -17,6 +17,9 @@ interface TaskTemplateDao {
     @Query("SELECT * FROM task_templates")
     fun observeAllTemplates(): Flow<List<TaskTemplate>>
 
+    @Query("SELECT * FROM task_templates")
+    suspend fun getAllTemplates(): List<TaskTemplate>
+
     @Query("SELECT * FROM task_templates WHERE isActive = 1")
     suspend fun getActiveTemplates(): List<TaskTemplate>
 

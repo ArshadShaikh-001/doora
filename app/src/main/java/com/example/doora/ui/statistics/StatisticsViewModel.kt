@@ -10,7 +10,7 @@ import com.example.doora.data.repository.TaskRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 data class StatisticsUiState(
@@ -21,37 +21,37 @@ data class StatisticsUiState(
 
 class StatisticsViewModel(private val repository: TaskRepository) : ViewModel() {
 
+    private val _selectedRange = MutableStateFlow(StatsTimeRange.LAST_7_DAYS)
     private val _state = MutableStateFlow(StatisticsUiState())
     val state: StateFlow<StatisticsUiState> = _state.asStateFlow()
 
     init {
         viewModelScope.launch {
-            repository.observeAllOccurrences().collect { allOccurrences ->
+            combine(
+                repository.observeAllOccurrences(),
+                repository.observeAllTemplates(),
+                _selectedRange
+            ) { allOccurrences, allTemplates, selectedRange ->
                 val today = repository.todayString()
                 val stats = StreakAndStatsEngine.calculateStatistics(
                     allOccurrences = allOccurrences,
-                    selectedRange = _state.value.selectedRange,
+                    templates = allTemplates,
+                    selectedRange = selectedRange,
                     todayDateStr = today
                 )
-                _state.update {
-                    it.copy(stats = stats, isLoading = false)
-                }
+                StatisticsUiState(
+                    selectedRange = selectedRange,
+                    stats = stats,
+                    isLoading = false
+                )
+            }.collect { uiState ->
+                _state.value = uiState
             }
         }
     }
 
     fun selectRange(range: StatsTimeRange) {
-        viewModelScope.launch {
-            _state.update { it.copy(selectedRange = range) }
-            val allOccurrences = repository.getAllOccurrences()
-            val today = repository.todayString()
-            val stats = StreakAndStatsEngine.calculateStatistics(
-                allOccurrences = allOccurrences,
-                selectedRange = range,
-                todayDateStr = today
-            )
-            _state.update { it.copy(stats = stats) }
-        }
+        _selectedRange.value = range
     }
 
     class Factory(private val repo: TaskRepository) : ViewModelProvider.Factory {
