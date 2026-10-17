@@ -55,13 +55,13 @@ val TASK_COLOR_PALETTE: List<Int> = listOf(
 )
 
 /**
- * Grid of colour swatches. Colours in [usedColors] are dimmed and non-clickable
- * (unless they equal [selectedColor], which is the current task's own colour).
+ * Grid of colour swatches. Colours in [usedColors] are reserved for the selected date
+ * by other active, incomplete tasks and are visually disabled.
  */
 @Composable
 fun ColorPicker(
     selectedColor: Int,
-    usedColors: List<Int>,
+    usedColors: List<Int> = emptyList(),
     onColorSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -78,12 +78,12 @@ fun ColorPicker(
             ) {
                 for (colorInt in row) {
                     val isSelected = colorInt == selectedColor
-                    val isUnavailable = colorInt in usedColors && !isSelected
+                    val isUnavailable = colorInt in usedColors
                     ModernColorSwatch(
                         colorInt = colorInt,
                         isSelected = isSelected,
                         isUnavailable = isUnavailable,
-                        onClick = { if (!isUnavailable) onColorSelected(colorInt) }
+                        onClick = { onColorSelected(colorInt) }
                     )
                 }
             }
@@ -134,7 +134,6 @@ private fun ModernColorSwatch(
                 .clip(CircleShape)
                 .background(if (isUnavailable) color.copy(alpha = 0.22f) else color)
                 .clickable(
-                    enabled = !isUnavailable,
                     interactionSource = remember { MutableInteractionSource() },
                     indication = ripple(bounded = false, radius = 20.dp),
                     onClick = onClick
@@ -144,14 +143,14 @@ private fun ModernColorSwatch(
             if (isUnavailable) {
                 Icon(
                     imageVector = Icons.Default.Lock,
-                    contentDescription = "Color locked",
+                    contentDescription = "Color reserved for this date",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     modifier = Modifier.size(14.dp)
                 )
             }
 
             AnimatedVisibility(
-                visible = isSelected,
+                visible = isSelected && !isUnavailable,
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut()
             ) {

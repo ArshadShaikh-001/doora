@@ -438,4 +438,84 @@ class StreakAndStatsEngineTest {
             }
         }
     }
+
+    @Test
+    fun testMultipleTasksSharingSameColor_CalculatesCorrectly() {
+        val sharedColor = 0xFFEF5350.toInt() // Red
+        val taskA = TaskTemplate(
+            id = 1L,
+            title = "Task A",
+            priority = Priority.HIGH,
+            color = sharedColor,
+            recurrenceType = RecurrenceType.DAILY,
+            scheduledTimeMinutes = 540,
+            startDate = "2026-09-20",
+            isActive = true
+        )
+        val taskB = TaskTemplate(
+            id = 2L,
+            title = "Task B",
+            priority = Priority.MEDIUM,
+            color = sharedColor,
+            recurrenceType = RecurrenceType.DAILY,
+            scheduledTimeMinutes = 600,
+            startDate = "2026-09-20",
+            isActive = true
+        )
+
+        val occA = TaskOccurrence(
+            id = 101L,
+            templateId = 1L,
+            title = "Task A",
+            priority = Priority.HIGH,
+            color = sharedColor,
+            scheduledDate = "2026-09-26",
+            scheduledTimeMinutes = 540,
+            status = OccurrenceStatus.COMPLETED
+        )
+        val occB = TaskOccurrence(
+            id = 102L,
+            templateId = 2L,
+            title = "Task B",
+            priority = Priority.MEDIUM,
+            color = sharedColor,
+            scheduledDate = "2026-09-26",
+            scheduledTimeMinutes = 600,
+            status = OccurrenceStatus.COMPLETED
+        )
+
+        // Verify occurrences preserve their assigned colors
+        assertEquals(sharedColor, occA.color)
+        assertEquals(sharedColor, occB.color)
+
+        val templates = listOf(taskA, taskB)
+        val occurrences = listOf(occA, occB)
+
+        val stats = StreakAndStatsEngine.calculateStatistics(
+            allOccurrences = occurrences,
+            templates = templates,
+            selectedRange = StatsTimeRange.TODAY,
+            todayDateStr = "2026-09-26"
+        )
+
+        assertEquals(2, stats.tasksCompletedToday)
+        assertEquals(2, stats.totalTasksToday)
+        assertEquals(100f, stats.dailyCompletionRate, 0.1f)
+        assertEquals(2, stats.totalTasksCompleted)
+
+        val streaks = StreakAndStatsEngine.calculateAllDailyStreaks(
+            dailyTemplates = templates,
+            allOccurrences = occurrences,
+            todayDateStr = "2026-09-26"
+        )
+        assertEquals(2, streaks.size)
+        assertEquals(sharedColor, streaks[0].color)
+        assertEquals(sharedColor, streaks[1].color)
+    }
+
+    @Test
+    fun testTaskColorPalette_Has14DistinctColors() {
+        assertEquals(14, com.example.doora.ui.components.TASK_COLOR_PALETTE.size)
+        assertEquals(14, com.example.doora.ui.components.TASK_COLOR_PALETTE.toSet().size)
+    }
 }

@@ -21,6 +21,12 @@ interface TaskOccurrenceDao {
     )
     fun observeForDate(date: String): Flow<List<TaskOccurrence>>
 
+    @Query("SELECT * FROM task_occurrences WHERE scheduledDate = :date")
+    suspend fun getForDate(date: String): List<TaskOccurrence>
+
+    @Query("SELECT * FROM task_occurrences WHERE status = 'PENDING' AND color = :color AND scheduledDate >= :fromDate")
+    suspend fun getPendingOccurrencesWithColor(color: Int, fromDate: String): List<TaskOccurrence>
+
     @Query(
         """
         SELECT * FROM task_occurrences

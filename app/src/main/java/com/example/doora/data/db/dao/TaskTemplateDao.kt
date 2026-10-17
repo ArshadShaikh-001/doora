@@ -23,6 +23,9 @@ interface TaskTemplateDao {
     @Query("SELECT * FROM task_templates WHERE isActive = 1")
     suspend fun getActiveTemplates(): List<TaskTemplate>
 
+    @Query("SELECT * FROM task_templates WHERE isActive = 1 AND color = :color")
+    suspend fun getActiveTemplatesWithColor(color: Int): List<TaskTemplate>
+
     @Query("SELECT * FROM task_templates WHERE id = :id")
     suspend fun getById(id: Long): TaskTemplate?
 

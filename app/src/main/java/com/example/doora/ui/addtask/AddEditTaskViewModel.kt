@@ -9,9 +9,14 @@ import com.example.doora.data.model.Priority
 import com.example.doora.data.model.RecurrenceType
 import com.example.doora.data.repository.TaskRepository
 import com.example.doora.ui.components.TASK_COLOR_PALETTE
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -72,7 +77,6 @@ class AddEditTaskViewModel(
                 if (occurrence != null) {
                     val template = repository.getTemplateById(occurrence.templateId)
                     val isRecurring = template != null && template.recurrenceType != RecurrenceType.ONE_TIME
-                    val usedColors = repository.getUsedColors(excludeTemplateId = occurrence.templateId)
 
                     val weekdaysSet = template?.weekdays
                         ?.split(",")
@@ -99,7 +103,6 @@ class AddEditTaskViewModel(
                             selectedWeekdays = weekdaysSet,
                             dayOfMonth = template?.dayOfMonth ?: 1,
                             specificDates = specificDatesList,
-                            usedColors = usedColors,
                             ringtoneUri = currentRingtoneUri,
                             isEditMode = true,
                             isRecurringTask = isRecurring,
@@ -110,19 +113,56 @@ class AddEditTaskViewModel(
                     }
                 }
             } else {
-                // Add mode — pick first free color
-                val usedColors = repository.getUsedColors()
-                val firstFreeColor = TASK_COLOR_PALETTE.firstOrNull { it !in usedColors }
-                    ?: TASK_COLOR_PALETTE.first()
+                // Add mode — default to today and first palette color
                 _state.update {
                     it.copy(
                         date = today,
-                        usedColors = usedColors,
-                        color = firstFreeColor,
+                        color = TASK_COLOR_PALETTE.first(),
                         recurrenceType = initialRecurrence ?: it.recurrenceType
                     )
                 }
             }
+        }
+
+        observeReservedColors()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeReservedColors() {
+        viewModelScope.launch {
+            _state
+                .map { s ->
+                    val excludeTemplateId = if (s.isEditMode) {
+                        s.originalTemplate?.id ?: s.originalOccurrence?.templateId ?: -1L
+                    } else -1L
+                    val excludeOccurrenceId = if (s.isEditMode && s.editScope == EditScope.ONLY_TODAY) {
+                        s.originalOccurrence?.id ?: -1L
+                    } else if (s.isEditMode && !s.isRecurringTask) {
+                        s.originalOccurrence?.id ?: -1L
+                    } else -1L
+                    Triple(s.date, excludeTemplateId, excludeOccurrenceId)
+                }
+                .distinctUntilChanged()
+                .flatMapLatest { (dateStr, excludeTemplateId, excludeOccurrenceId) ->
+                    if (dateStr.isBlank()) {
+                        flowOf(emptyList())
+                    } else {
+                        repository.observeReservedColorsForDate(dateStr, excludeTemplateId, excludeOccurrenceId)
+                    }
+                }
+                .collect { reservedColors ->
+                    _state.update { current ->
+                        val newColor = if (!current.isEditMode && current.color in reservedColors) {
+                            TASK_COLOR_PALETTE.firstOrNull { it !in reservedColors } ?: current.color
+                        } else {
+                            current.color
+                        }
+                        current.copy(
+                            usedColors = reservedColors,
+                            color = newColor
+                        )
+                    }
+                }
         }
     }
 
@@ -132,10 +172,11 @@ class AddEditTaskViewModel(
     fun updatePriority(v: Priority) { _state.update { it.copy(priority = v) } }
     fun updateRingtone(uri: String?, title: String?) { _state.update { it.copy(ringtoneUri = uri, ringtoneTitle = title) } }
     fun updateColor(v: Int) {
-        val s = _state.value
-        if (v !in s.usedColors) {
-            _state.update { it.copy(color = v, error = null) }
+        if (v in _state.value.usedColors) {
+            _state.update { it.copy(error = "This color is already assigned for that date") }
+            return
         }
+        _state.update { it.copy(color = v, error = null) }
     }
     fun updateRecurrence(v: RecurrenceType) { _state.update { it.copy(recurrenceType = v) } }
     fun updateEditScope(scope: EditScope) { _state.update { it.copy(editScope = scope) } }
@@ -176,8 +217,9 @@ class AddEditTaskViewModel(
             _state.update { it.copy(error = "Title cannot be empty") }
             return
         }
+
         if (s.color in s.usedColors) {
-            _state.update { it.copy(error = "This color is already in use by another active task") }
+            _state.update { it.copy(error = "This color is already assigned for that date") }
             return
         }
 

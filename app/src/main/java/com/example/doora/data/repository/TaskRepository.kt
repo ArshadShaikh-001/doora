@@ -15,8 +15,10 @@ import com.example.doora.data.model.OccurrenceStatus
 import com.example.doora.data.model.Priority
 import com.example.doora.data.model.RecurrenceType
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -157,7 +159,172 @@ class TaskRepository(
     }
 
     suspend fun getUsedColors(excludeTemplateId: Long = -1L): List<Int> =
-        templateDao.getUsedColors(excludeTemplateId)
+        getReservedColorsForDate(todayString(), excludeTemplateId = excludeTemplateId)
+
+    /**
+     * Returns the list of colors currently reserved on [dateStr].
+     *
+     * A color is reserved on [dateStr] if:
+     * 1. A PENDING task occurrence is scheduled for [dateStr] with that color.
+     * 2. An active recurring template is scheduled to occur on [dateStr] with that color,
+     *    and its occurrence on [dateStr] is not completed, skipped, or missed.
+     */
+    suspend fun getReservedColorsForDate(
+        dateStr: String,
+        excludeTemplateId: Long = -1L,
+        excludeOccurrenceId: Long = -1L
+    ): List<Int> {
+        val reservedColors = mutableSetOf<Int>()
+        val occurrencesOnDate = occurrenceDao.getForDate(dateStr)
+        val existingTemplateIdsOnDate = mutableSetOf<Long>()
+
+        for (occ in occurrencesOnDate) {
+            existingTemplateIdsOnDate.add(occ.templateId)
+            if (occ.id == excludeOccurrenceId || occ.templateId == excludeTemplateId) {
+                continue
+            }
+            if (occ.status == OccurrenceStatus.PENDING) {
+                reservedColors.add(occ.color)
+            }
+        }
+
+        val activeTemplates = templateDao.getActiveTemplates()
+        for (tmpl in activeTemplates) {
+            if (tmpl.id == excludeTemplateId || tmpl.recurrenceType == RecurrenceType.ONE_TIME) {
+                continue
+            }
+            if (tmpl.id in existingTemplateIdsOnDate) {
+                continue
+            }
+            if (RecurrenceEngine.shouldOccurOnDate(tmpl, dateStr)) {
+                reservedColors.add(tmpl.color)
+            }
+        }
+
+        return reservedColors.toList()
+    }
+
+    /**
+     * Real-time reactive Flow of reserved colors on [dateStr].
+     * Automatically updates when tasks are completed, skipped, missed, rescheduled, or deleted.
+     */
+    fun observeReservedColorsForDate(
+        dateStr: String,
+        excludeTemplateId: Long = -1L,
+        excludeOccurrenceId: Long = -1L
+    ): Flow<List<Int>> = combine(
+        occurrenceDao.observeForDate(dateStr),
+        templateDao.observeActiveTemplates()
+    ) { occurrencesOnDate, activeTemplates ->
+        val reservedColors = mutableSetOf<Int>()
+        val existingTemplateIdsOnDate = mutableSetOf<Long>()
+
+        for (occ in occurrencesOnDate) {
+            existingTemplateIdsOnDate.add(occ.templateId)
+            if (occ.id == excludeOccurrenceId || occ.templateId == excludeTemplateId) {
+                continue
+            }
+            if (occ.status == OccurrenceStatus.PENDING) {
+                reservedColors.add(occ.color)
+            }
+        }
+
+        for (tmpl in activeTemplates) {
+            if (tmpl.id == excludeTemplateId || tmpl.recurrenceType == RecurrenceType.ONE_TIME) {
+                continue
+            }
+            if (tmpl.id in existingTemplateIdsOnDate) {
+                continue
+            }
+            if (RecurrenceEngine.shouldOccurOnDate(tmpl, dateStr)) {
+                reservedColors.add(tmpl.color)
+            }
+        }
+
+        reservedColors.toList()
+    }
+
+    /**
+     * Checks if a recurring task with [color] conflicts with any other task on any of its scheduled dates.
+     * Returns the conflicting date string, or null if no conflict exists.
+     */
+    suspend fun findRecurringColorConflict(
+        color: Int,
+        recurrenceType: RecurrenceType,
+        startDate: String,
+        weekdays: String = "",
+        dayOfMonth: Int = 1,
+        specificDates: String = "",
+        excludeTemplateId: Long = -1L
+    ): String? {
+        val candidate = TaskTemplate(
+            title = "",
+            priority = Priority.MEDIUM,
+            color = color,
+            recurrenceType = recurrenceType,
+            scheduledTimeMinutes = 0,
+            startDate = startDate,
+            weekdays = weekdays,
+            dayOfMonth = dayOfMonth,
+            specificDates = specificDates,
+            isActive = true
+        )
+
+        // 1. For SPECIFIC_DATES, check each specified date
+        if (recurrenceType == RecurrenceType.SPECIFIC_DATES) {
+            val dates = specificDates.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            for (d in dates) {
+                if (color in getReservedColorsForDate(d, excludeTemplateId = excludeTemplateId)) {
+                    return d
+                }
+            }
+            return null
+        }
+
+        // 2. Check startDate first
+        if (color in getReservedColorsForDate(startDate, excludeTemplateId = excludeTemplateId)) {
+            return startDate
+        }
+
+        if (recurrenceType == RecurrenceType.ONE_TIME) {
+            return null
+        }
+
+        // 3. Check against existing pending occurrences with the same color
+        val pendingWithColor = occurrenceDao.getPendingOccurrencesWithColor(color, startDate)
+        for (occ in pendingWithColor) {
+            if (occ.templateId == excludeTemplateId) continue
+            if (RecurrenceEngine.shouldOccurOnDate(candidate, occ.scheduledDate)) {
+                return occ.scheduledDate
+            }
+        }
+
+        // 4. Check against other active recurring templates with the same color
+        val otherActiveWithColor = templateDao.getActiveTemplatesWithColor(color)
+            .filter { it.id != excludeTemplateId && it.recurrenceType != RecurrenceType.ONE_TIME }
+
+        if (otherActiveWithColor.isNotEmpty()) {
+            val cal = Calendar.getInstance().apply {
+                time = RecurrenceEngine.parseDate(startDate) ?: Date()
+            }
+            for (i in 0 until 365) {
+                val d = RecurrenceEngine.formatDate(cal.time)
+                if (RecurrenceEngine.shouldOccurOnDate(candidate, d)) {
+                    for (other in otherActiveWithColor) {
+                        if (RecurrenceEngine.shouldOccurOnDate(other, d)) {
+                            val existingOcc = occurrenceDao.findByTemplateAndDate(other.id, d)
+                            if (existingOcc == null || existingOcc.status == OccurrenceStatus.PENDING) {
+                                return d
+                            }
+                        }
+                    }
+                }
+                cal.add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+
+        return null
+    }
 
     suspend fun getTemplateById(id: Long): TaskTemplate? = templateDao.getById(id)
 
@@ -188,7 +355,9 @@ class TaskRepository(
         ringtoneUri: String? = null
     ): Result<Unit> = runCatching {
         if (hasTimeConflict(date, timeMinutes)) error("A task already exists at this time on $date")
-        if (color in getUsedColors()) error("Color is already in use by another active task")
+        if (color in getReservedColorsForDate(date)) {
+            error("This color is already assigned for that date")
+        }
         val templateId = templateDao.insert(
             TaskTemplate(
                 title = title,
@@ -229,7 +398,18 @@ class TaskRepository(
         if (startDate == today && hasTimeConflict(today, timeMinutes)) {
             error("A task already exists at this time today")
         }
-        if (color in getUsedColors()) error("Color is already in use by another active task")
+        val conflictDate = findRecurringColorConflict(
+            color = color,
+            recurrenceType = recurrenceType,
+            startDate = startDate,
+            weekdays = weekdays,
+            dayOfMonth = dayOfMonth,
+            specificDates = specificDates,
+            excludeTemplateId = -1L
+        )
+        if (conflictDate != null) {
+            error("This color is already assigned for that date")
+        }
 
         val template = TaskTemplate(
             title = title,
@@ -345,6 +525,16 @@ class TaskRepository(
         }
 
         val occurrence = occurrenceDao.findById(occurrenceId) ?: error("Task occurrence not found")
+
+        val isSameDate = occurrence.scheduledDate == newDate
+        val reservedOnNewDate = getReservedColorsForDate(
+            newDate,
+            excludeTemplateId = if (isSameDate) occurrence.templateId else -1L,
+            excludeOccurrenceId = if (isSameDate) occurrenceId else -1L
+        )
+        if (occurrence.color in reservedOnNewDate) {
+            error("This color is already assigned for that date")
+        }
 
         val updated = occurrence.copy(
             scheduledDate = newDate,
@@ -546,8 +736,13 @@ class TaskRepository(
         if (hasTimeConflict(occurrence.scheduledDate, timeMinutes, occurrence.id)) {
             error("A task already exists at this time on ${occurrence.scheduledDate}")
         }
-        if (color in getUsedColors(excludeTemplateId = occurrence.templateId)) {
-            error("Color is already in use by another active task")
+        val reservedColors = getReservedColorsForDate(
+            occurrence.scheduledDate,
+            excludeTemplateId = occurrence.templateId,
+            excludeOccurrenceId = occurrence.id
+        )
+        if (color in reservedColors) {
+            error("This color is already assigned for that date")
         }
         val updated = occurrence.copy(
             title = title,
@@ -584,8 +779,18 @@ class TaskRepository(
         if (currentOcc != null && hasTimeConflict(today, timeMinutes, currentOcc.id)) {
             error("A task already exists at this time today")
         }
-        if (color in getUsedColors(excludeTemplateId = template.id)) {
-            error("Color is already in use by another active task")
+
+        val conflictDate = findRecurringColorConflict(
+            color = color,
+            recurrenceType = recurrenceType,
+            startDate = template.startDate,
+            weekdays = weekdays,
+            dayOfMonth = dayOfMonth,
+            specificDates = specificDates,
+            excludeTemplateId = template.id
+        )
+        if (conflictDate != null) {
+            error("This color is already assigned for that date")
         }
 
         val updatedTemplate = template.copy(
