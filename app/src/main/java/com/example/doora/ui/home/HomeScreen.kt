@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -29,14 +30,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,6 +60,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -62,10 +68,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.doora.DooraApplication
 import com.example.doora.data.db.entity.TaskOccurrence
 import com.example.doora.data.model.OccurrenceStatus
 import com.example.doora.data.model.RecurrenceType
 import com.example.doora.data.repository.TaskRepository
+import com.example.doora.data.repository.TasksViewMode
 import com.example.doora.ui.components.TaskCard
 import com.example.doora.ui.theme.GoldBorder
 import com.example.doora.ui.theme.GoldBorderSubdued
@@ -118,13 +126,23 @@ fun HomeScreen(
     onAddTask: () -> Unit,
     onEditTask: (Long) -> Unit
 ) {
-    val vm: HomeViewModel = viewModel(factory = HomeViewModel.Factory(repository))
+    val context = LocalContext.current.applicationContext as DooraApplication
+    val vm: HomeViewModel = viewModel(
+        factory = HomeViewModel.Factory(repository, context.tasksPreferencesRepository)
+    )
+
+    val currentViewMode by vm.currentViewMode.collectAsState()
+    val defaultViewMode by vm.defaultViewMode.collectAsState()
+    val selectedTimelineDate by vm.selectedTimelineDate.collectAsState()
+    val timelineTasks by vm.timelineTasks.collectAsState()
+
     val tasks by vm.todayTasks.collectAsState()
     val templateMap by vm.templateMap.collectAsState()
     val timeSnapshot = rememberCurrentTimeSnapshot()
     val scope = rememberCoroutineScope()
 
     var taskPendingDelete by remember { mutableStateOf<TaskOccurrence?>(null) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Contextual luxury greeting
@@ -164,7 +182,7 @@ fun HomeScreen(
                     color = TextPrimaryDark
                 )
                 Text(
-                    text = "Choose whether to remove only today's scheduled task or cancel the entire recurring series.",
+                    text = "Choose whether to remove only this scheduled task occurrence or cancel the entire recurring series.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondaryDark
                 )
@@ -185,7 +203,7 @@ fun HomeScreen(
                         contentColor = Color(0xFF14120E)
                     )
                 ) {
-                    Text("Delete only today", fontWeight = FontWeight.SemiBold)
+                    Text("Delete only this occurrence", fontWeight = FontWeight.SemiBold)
                 }
 
                 OutlinedButton(
@@ -207,10 +225,21 @@ fun HomeScreen(
         }
     }
 
+    // Tasks Settings Modal Sheet for Configurable Default View
+    if (showSettingsSheet) {
+        TasksSettingsBottomSheet(
+            defaultMode = defaultViewMode,
+            onSelectDefaultMode = { newMode ->
+                vm.setDefaultViewMode(newMode)
+            },
+            onDismiss = { showSettingsSheet = false }
+        )
+    }
+
     Scaffold(
         containerColor = LuxuryBackground,
         floatingActionButton = {
-            // Floating Luxury New Task Button matching reference screenshot
+            // Floating Luxury New Task Button
             Box(
                 modifier = Modifier
                     .shadow(
@@ -269,173 +298,467 @@ fun HomeScreen(
                 dateString = dateFormatted
             )
 
-            val incompleteTasks = remember(tasks) {
-                tasks.filter { it.status != OccurrenceStatus.COMPLETED }
-            }
-            val completedTasks = remember(tasks) {
-                tasks.filter { it.status == OccurrenceStatus.COMPLETED }
-            }
+            // Segmented Selector: List | Timeline + Default View Settings
+            TasksViewSelector(
+                currentMode = currentViewMode,
+                onSelectMode = { mode -> vm.setViewMode(mode) },
+                onOpenSettings = { showSettingsSheet = true }
+            )
 
-            if (tasks.isEmpty()) {
-                HomeEmptyState(onAddTask = onAddTask)
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Group 1: Incomplete / Active section header
-                    if (incompleteTasks.isNotEmpty()) {
-                        item(key = "active_section_header") {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 2.dp)
-                                    .animateItem(
-                                        fadeInSpec = tween(250),
-                                        fadeOutSpec = tween(200),
-                                        placementSpec = spring(
-                                            dampingRatio = Spring.DampingRatioNoBouncy,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        )
-                                    ),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "ACTIVE",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextSecondaryDark.copy(alpha = 0.85f),
-                                    letterSpacing = 1.6.sp,
-                                    fontSize = 12.sp
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "(${incompleteTasks.size})",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextSecondaryDark.copy(alpha = 0.65f),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
+            Spacer(Modifier.height(4.dp))
+
+            when (currentViewMode) {
+                TasksViewMode.LIST -> {
+                    val incompleteTasks = remember(tasks) {
+                        tasks.filter { it.status != OccurrenceStatus.COMPLETED }
+                    }
+                    val completedTasks = remember(tasks) {
+                        tasks.filter { it.status == OccurrenceStatus.COMPLETED }
                     }
 
-                    // Incomplete Tasks
-                    items(
-                        items = incompleteTasks,
-                        key = { it.id }
-                    ) { occurrence ->
-                        val template = templateMap[occurrence.templateId]
-                        val isRecurring = template != null && template.recurrenceType != RecurrenceType.ONE_TIME
-                        val isOverdue = occurrence.status == OccurrenceStatus.PENDING && (
-                            occurrence.scheduledDate < timeSnapshot.dateStr ||
-                            (occurrence.scheduledDate == timeSnapshot.dateStr && timeSnapshot.minutesSinceMidnight >= occurrence.scheduledTimeMinutes)
-                        )
-                        TaskCard(
-                            occurrence = occurrence,
-                            isRecurring = isRecurring,
-                            isOverdue = isOverdue,
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = tween(durationMillis = 300),
-                                fadeOutSpec = tween(durationMillis = 200),
-                                placementSpec = spring(
-                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                    stiffness = Spring.StiffnessMediumLow
-                                )
-                            ),
-                            onComplete = { vm.completeTask(occurrence) },
-                            onSkip = { vm.skipTask(occurrence) },
-                            onEdit = { onEditTask(occurrence.id) },
-                            onDelete = {
-                                scope.launch {
-                                    if (isRecurring || vm.isRecurring(occurrence.templateId)) {
-                                        taskPendingDelete = occurrence
-                                    } else {
-                                        vm.deleteOccurrenceOnly(occurrence)
+                    if (tasks.isEmpty()) {
+                        HomeEmptyState(onAddTask = onAddTask)
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 96.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Group 1: Incomplete / Active section header
+                            if (incompleteTasks.isNotEmpty()) {
+                                item(key = "active_section_header") {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 2.dp)
+                                            .animateItem(
+                                                fadeInSpec = tween(250),
+                                                fadeOutSpec = tween(200),
+                                                placementSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            ),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "ACTIVE",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextSecondaryDark.copy(alpha = 0.85f),
+                                            letterSpacing = 1.6.sp,
+                                            fontSize = 12.sp
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "(${incompleteTasks.size})",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Medium,
+                                            color = TextSecondaryDark.copy(alpha = 0.65f),
+                                            fontSize = 12.sp
+                                        )
                                     }
                                 }
                             }
-                        )
-                    }
 
-                    // Group 2: Completed tasks section
-                    if (completedTasks.isNotEmpty()) {
-                        item(key = "completed_section_separator") {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = if (incompleteTasks.isEmpty()) 4.dp else 16.dp, bottom = 2.dp)
-                                    .animateItem(
-                                        fadeInSpec = tween(250),
-                                        fadeOutSpec = tween(200),
+                            // Incomplete Tasks
+                            items(
+                                items = incompleteTasks,
+                                key = { it.id }
+                            ) { occurrence ->
+                                val template = templateMap[occurrence.templateId]
+                                val isRecurring = template != null && template.recurrenceType != RecurrenceType.ONE_TIME
+                                val isOverdue = occurrence.status == OccurrenceStatus.PENDING && (
+                                    occurrence.scheduledDate < timeSnapshot.dateStr ||
+                                    (occurrence.scheduledDate == timeSnapshot.dateStr && timeSnapshot.minutesSinceMidnight >= occurrence.scheduledTimeMinutes)
+                                )
+                                TaskCard(
+                                    occurrence = occurrence,
+                                    isRecurring = isRecurring,
+                                    isOverdue = isOverdue,
+                                    modifier = Modifier.animateItem(
+                                        fadeInSpec = tween(durationMillis = 300),
+                                        fadeOutSpec = tween(durationMillis = 200),
                                         placementSpec = spring(
                                             dampingRatio = Spring.DampingRatioNoBouncy,
                                             stiffness = Spring.StiffnessMediumLow
                                         )
                                     ),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "COMPLETED",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextSecondaryDark.copy(alpha = 0.75f),
-                                    letterSpacing = 1.6.sp,
-                                    fontSize = 12.sp
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "(${completedTasks.size})",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextSecondaryDark.copy(alpha = 0.55f),
-                                    fontSize = 12.sp
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                HorizontalDivider(
-                                    modifier = Modifier.weight(1f),
-                                    thickness = 0.8.dp,
-                                    color = GoldBorderSubdued
-                                )
-                            }
-                        }
-
-                        items(
-                            items = completedTasks,
-                            key = { it.id }
-                        ) { occurrence ->
-                            val template = templateMap[occurrence.templateId]
-                            val isRecurring = template != null && template.recurrenceType != RecurrenceType.ONE_TIME
-                            TaskCard(
-                                occurrence = occurrence,
-                                isRecurring = isRecurring,
-                                isOverdue = false,
-                                modifier = Modifier.animateItem(
-                                    fadeInSpec = tween(durationMillis = 300),
-                                    fadeOutSpec = tween(durationMillis = 200),
-                                    placementSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                ),
-                                onComplete = {},
-                                onSkip = { vm.skipTask(occurrence) },
-                                onEdit = { onEditTask(occurrence.id) },
-                                onDelete = {
-                                    scope.launch {
-                                        if (isRecurring || vm.isRecurring(occurrence.templateId)) {
-                                            taskPendingDelete = occurrence
-                                        } else {
-                                            vm.deleteOccurrenceOnly(occurrence)
+                                    onComplete = { vm.completeTask(occurrence) },
+                                    onSkip = { vm.skipTask(occurrence) },
+                                    onEdit = { onEditTask(occurrence.id) },
+                                    onDelete = {
+                                        scope.launch {
+                                            if (isRecurring || vm.isRecurring(occurrence.templateId)) {
+                                                taskPendingDelete = occurrence
+                                            } else {
+                                                vm.deleteOccurrenceOnly(occurrence)
+                                            }
                                         }
                                     }
+                                )
+                            }
+
+                            // Group 2: Completed tasks section
+                            if (completedTasks.isNotEmpty()) {
+                                item(key = "completed_section_separator") {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = if (incompleteTasks.isEmpty()) 4.dp else 16.dp, bottom = 2.dp)
+                                            .animateItem(
+                                                fadeInSpec = tween(250),
+                                                fadeOutSpec = tween(200),
+                                                placementSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            ),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "COMPLETED",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextSecondaryDark.copy(alpha = 0.75f),
+                                            letterSpacing = 1.6.sp,
+                                            fontSize = 12.sp
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "(${completedTasks.size})",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Medium,
+                                            color = TextSecondaryDark.copy(alpha = 0.55f),
+                                            fontSize = 12.sp
+                                        )
+                                        Spacer(Modifier.width(12.dp))
+                                        HorizontalDivider(
+                                            modifier = Modifier.weight(1f),
+                                            thickness = 0.8.dp,
+                                            color = GoldBorderSubdued
+                                        )
+                                    }
                                 }
-                            )
+
+                                items(
+                                    items = completedTasks,
+                                    key = { it.id }
+                                ) { occurrence ->
+                                    val template = templateMap[occurrence.templateId]
+                                    val isRecurring = template != null && template.recurrenceType != RecurrenceType.ONE_TIME
+                                    TaskCard(
+                                        occurrence = occurrence,
+                                        isRecurring = isRecurring,
+                                        isOverdue = false,
+                                        modifier = Modifier.animateItem(
+                                            fadeInSpec = tween(durationMillis = 300),
+                                            fadeOutSpec = tween(durationMillis = 200),
+                                            placementSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        ),
+                                        onComplete = {},
+                                        onSkip = { vm.skipTask(occurrence) },
+                                        onEdit = { onEditTask(occurrence.id) },
+                                        onDelete = {
+                                            scope.launch {
+                                                if (isRecurring || vm.isRecurring(occurrence.templateId)) {
+                                                    taskPendingDelete = occurrence
+                                                } else {
+                                                    vm.deleteOccurrenceOnly(occurrence)
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
+
+                TasksViewMode.TIMELINE -> {
+                    DailyTimelineView(
+                        selectedDate = selectedTimelineDate,
+                        todayDate = repository.todayString(),
+                        tasks = timelineTasks,
+                        templateMap = templateMap,
+                        timeSnapshot = timeSnapshot,
+                        onPrevDay = { vm.prevTimelineDay() },
+                        onNextDay = { vm.nextTimelineDay() },
+                        onSelectDate = { dateStr -> vm.selectTimelineDate(dateStr) },
+                        onGoToToday = { vm.goToToday() },
+                        onCompleteTask = { occ -> vm.completeTask(occ) },
+                        onSkipTask = { occ -> vm.skipTask(occ) },
+                        onEditTask = onEditTask,
+                        onDeleteTask = { occ ->
+                            scope.launch {
+                                val template = templateMap[occ.templateId]
+                                val isRecurring = template != null && template.recurrenceType != RecurrenceType.ONE_TIME
+                                if (isRecurring || vm.isRecurring(occ.templateId)) {
+                                    taskPendingDelete = occ
+                                } else {
+                                    vm.deleteOccurrenceOnly(occ)
+                                }
+                            }
+                        },
+                        onAddTask = onAddTask
+                    )
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun TasksViewSelector(
+    currentMode: TasksViewMode,
+    onSelectMode: (TasksViewMode) -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Compact segmented selector pill
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = LuxuryCardSurface,
+            border = BorderStroke(1.dp, GoldBorderSubdued)
+        ) {
+            Row(
+                modifier = Modifier.padding(3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // List Segment
+                val isList = currentMode == TasksViewMode.LIST
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(
+                            if (isList) Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFFDFC083),
+                                    Color(0xFFF3E2BD),
+                                    Color(0xFFBF9F63)
+                                )
+                            )
+                            else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                        )
+                        .clickable { onSelectMode(TasksViewMode.LIST) }
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "List",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (isList) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isList) Color(0xFF14120E) else TextSecondaryDark,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Spacer(Modifier.width(2.dp))
+
+                // Timeline Segment
+                val isTimeline = currentMode == TasksViewMode.TIMELINE
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(
+                            if (isTimeline) Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFFDFC083),
+                                    Color(0xFFF3E2BD),
+                                    Color(0xFFBF9F63)
+                                )
+                            )
+                            else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                        )
+                        .clickable { onSelectMode(TasksViewMode.TIMELINE) }
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Timeline",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (isTimeline) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isTimeline) Color(0xFF14120E) else TextSecondaryDark,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
+        // View Preferences Button
+        IconButton(
+            onClick = onOpenSettings,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(LuxuryCardSurface)
+                .border(1.dp, GoldBorderSubdued, CircleShape)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Default Tasks View Settings",
+                tint = GoldSecondary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TasksSettingsBottomSheet(
+    defaultMode: TasksViewMode,
+    onSelectDefaultMode: (TasksViewMode) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = LuxuryCardSurface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Tasks Settings",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimaryDark
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "DEFAULT TASKS VIEW",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = GoldPrimary,
+                    letterSpacing = 1.4.sp,
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = "Choose which view Doora opens by default when launching.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondaryDark
+                )
+            }
+
+            // Option 1: List
+            Surface(
+                onClick = { onSelectDefaultMode(TasksViewMode.LIST) },
+                shape = RoundedCornerShape(16.dp),
+                color = if (defaultMode == TasksViewMode.LIST) Color(0x18DFC083) else LuxuryBackground,
+                border = BorderStroke(
+                    1.dp,
+                    if (defaultMode == TasksViewMode.LIST) GoldPrimary else GoldBorderSubdued
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = defaultMode == TasksViewMode.LIST,
+                        onClick = null,
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = GoldPrimary,
+                            unselectedColor = TextSecondaryDark
+                        )
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "List",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimaryDark
+                        )
+                        Text(
+                            text = "Grouped by active and completed tasks",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                    }
+                }
+            }
+
+            // Option 2: Timeline
+            Surface(
+                onClick = { onSelectDefaultMode(TasksViewMode.TIMELINE) },
+                shape = RoundedCornerShape(16.dp),
+                color = if (defaultMode == TasksViewMode.TIMELINE) Color(0x18DFC083) else LuxuryBackground,
+                border = BorderStroke(
+                    1.dp,
+                    if (defaultMode == TasksViewMode.TIMELINE) GoldPrimary else GoldBorderSubdued
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = defaultMode == TasksViewMode.TIMELINE,
+                        onClick = null,
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = GoldPrimary,
+                            unselectedColor = TextSecondaryDark
+                        )
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Timeline",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimaryDark
+                        )
+                        Text(
+                            text = "Vertical chronological timeline with live time indicator",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = GoldPrimary,
+                    contentColor = Color(0xFF14120E)
+                )
+            ) {
+                Text("Done", fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -448,13 +771,13 @@ private fun HomeHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 16.dp)
+            .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 10.dp)
     ) {
         Text(
             text = greeting,
             style = TextStyle(
                 fontFamily = FontFamily.Serif,
-                fontSize = 34.sp,
+                fontSize = 32.sp,
                 fontWeight = FontWeight.Normal,
                 color = TextLuxuryGreeting,
                 letterSpacing = 0.2.sp

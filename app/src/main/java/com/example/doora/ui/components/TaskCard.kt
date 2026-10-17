@@ -124,6 +124,7 @@ fun TaskCard(
     }
 
     Surface(
+        onClick = onEdit,
         modifier = modifier
             .fillMaxWidth()
             .travelingBorderHighlight(
@@ -209,6 +210,8 @@ fun TaskCard(
                             )
                         }
                     } else if (isSkipped) {
+                        StatusPill(status = occurrence.status)
+                    } else if (occurrence.status == OccurrenceStatus.MISSED) {
                         StatusPill(status = occurrence.status)
                     } else if (isEffectivelyOverdue) {
                         Surface(

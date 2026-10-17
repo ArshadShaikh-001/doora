@@ -6,6 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.doora.data.db.DooraDatabase
 import com.example.doora.data.repository.TaskRepository
+import com.example.doora.data.repository.TasksPreferencesRepository
 
 class DooraApplication : Application() {
 
@@ -32,6 +33,10 @@ class DooraApplication : Application() {
 
     val repository: TaskRepository by lazy {
         TaskRepository(this, database.templateDao(), database.occurrenceDao())
+    }
+
+    val tasksPreferencesRepository: TasksPreferencesRepository by lazy {
+        TasksPreferencesRepository(this)
     }
 
     override fun onCreate() {
