@@ -46,6 +46,85 @@ data class DailyTaskStreak(
     val recentDays: List<DayStreakStatus> = emptyList()
 )
 
+data class DailyTaskGraphItem(
+    val occurrenceId: Long,
+    val templateId: Long,
+    val title: String,
+    val color: Int,
+    val scheduledTimeMinutes: Int,
+    val status: OccurrenceStatus
+)
+
+data class DailyDateMetrics(
+    val dateStr: String,
+    val isToday: Boolean = false,
+    val isFuture: Boolean = false,
+    val tasks: List<DailyTaskGraphItem> = emptyList(),
+    val completedCount: Int = 0,
+    val missedCount: Int = 0,
+    val skippedCount: Int = 0,
+    val pendingCount: Int = 0,
+    val completionRate: Float = 0f
+)
+
+data class DailyTrendDay(
+    val dateStr: String,
+    val dayLabel: String,
+    val dayNumber: String,
+    val isToday: Boolean,
+    val completedCount: Int,
+    val totalCount: Int,
+    val completionRate: Float
+)
+
+data class WeeklyBucket(
+    val label: String,
+    val completed: Int,
+    val total: Int,
+    val rate: Float
+)
+
+data class MonthlyTrendSummary(
+    val monthLabel: String,
+    val totalCompleted: Int,
+    val totalEligible: Int,
+    val completionRate: Float,
+    val weeklyBuckets: List<WeeklyBucket> = emptyList()
+)
+
+data class DailyTaskStreakSummary(
+    val templateId: Long,
+    val title: String,
+    val color: Int,
+    val currentStreak: Int,
+    val longestStreak: Int,
+    val totalCompleted: Int,
+    val totalDaysEligible: Int
+)
+
+data class DailyInsightsData(
+    val selectedDate: String = "",
+    val selectedDateMetrics: DailyDateMetrics = DailyDateMetrics(""),
+    val weeklyTrend: List<DailyTrendDay> = emptyList(),
+    val monthlyTrend: MonthlyTrendSummary = MonthlyTrendSummary("", 0, 0, 0f),
+    val todayCompletionRate: Float = 0f,
+    val todayCompletedCount: Int = 0,
+    val todayTotalCount: Int = 0,
+    val totalCompletedAllTime: Int = 0,
+    val bestCurrentStreak: Int = 0,
+    val bestCurrentStreakTaskTitle: String? = null,
+    val longestStreakAllTime: Int = 0,
+    val longestStreakTaskTitle: String? = null,
+    val mostConsistentTaskTitle: String? = null,
+    val mostConsistentTaskColor: Int? = null,
+    val mostConsistentTaskRate: Float? = null,
+    val mostFrequentMissedTaskTitle: String? = null,
+    val mostFrequentMissedTaskColor: Int? = null,
+    val mostFrequentMissedCount: Int? = null,
+    val dailyStreaks: List<DailyTaskStreakSummary> = emptyList(),
+    val hasAnyDailyTasks: Boolean = false
+)
+
 data class StatisticsData(
     val tasksCompletedToday: Int = 0,
     val totalTasksToday: Int = 0,
@@ -497,8 +576,333 @@ object StreakAndStatsEngine {
         }
     }
 
-    private fun getPreviousDateString(dateStr: String): String {
+    fun getPreviousDateString(dateStr: String): String {
         return getDateDaysAgo(dateStr, 1)
+    }
+
+    fun getNextDateString(dateStr: String): String {
+        val date = runCatching { dateFormat.parse(dateStr) }.getOrNull() ?: Date()
+        val cal = Calendar.getInstance().apply {
+            time = date
+            add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return dateFormat.format(cal.time)
+    }
+
+    fun formatDisplayDate(dateStr: String, todayDateStr: String): String {
+        val date = runCatching { dateFormat.parse(dateStr) }.getOrNull() ?: return dateStr
+        val displayFormat = SimpleDateFormat("MMM d, yyyy", Locale.US)
+        val shortFormat = SimpleDateFormat("MMM d", Locale.US)
+        val yesterday = getPreviousDateString(todayDateStr)
+        val tomorrow = getNextDateString(todayDateStr)
+
+        return when (dateStr) {
+            todayDateStr -> "Today, ${shortFormat.format(date)}"
+            yesterday -> "Yesterday, ${shortFormat.format(date)}"
+            tomorrow -> "Tomorrow, ${shortFormat.format(date)}"
+            else -> {
+                val cal = Calendar.getInstance().apply { time = date }
+                val todayCal = Calendar.getInstance().apply {
+                    time = runCatching { dateFormat.parse(todayDateStr) }.getOrNull() ?: Date()
+                }
+                if (cal.get(Calendar.YEAR) == todayCal.get(Calendar.YEAR)) {
+                    SimpleDateFormat("EEE, MMM d", Locale.US).format(date)
+                } else {
+                    displayFormat.format(date)
+                }
+            }
+        }
+    }
+
+    fun calculateDailyDateMetrics(
+        selectedDateStr: String,
+        todayDateStr: String,
+        dailyTemplates: List<TaskTemplate>,
+        dailyOccurrences: List<TaskOccurrence>
+    ): DailyDateMetrics {
+        val isToday = selectedDateStr == todayDateStr
+        val isFuture = selectedDateStr > todayDateStr
+
+        val templateMap = dailyTemplates.associateBy { it.id }
+
+        val graphItems = if (isFuture) {
+            dailyTemplates
+                .filter { it.isActive && it.startDate <= selectedDateStr }
+                .map { tmpl ->
+                    val existingOcc = dailyOccurrences.find { it.templateId == tmpl.id && it.scheduledDate == selectedDateStr }
+                    DailyTaskGraphItem(
+                        occurrenceId = existingOcc?.id ?: -(tmpl.id),
+                        templateId = tmpl.id,
+                        title = existingOcc?.title ?: tmpl.title,
+                        color = if (existingOcc != null && existingOcc.color != 0) existingOcc.color else tmpl.color,
+                        scheduledTimeMinutes = existingOcc?.scheduledTimeMinutes ?: tmpl.scheduledTimeMinutes,
+                        status = OccurrenceStatus.PENDING
+                    )
+                }
+                .sortedWith(compareBy({ it.scheduledTimeMinutes }, { it.occurrenceId }))
+        } else {
+            val storedOccs = dailyOccurrences.filter { it.scheduledDate == selectedDateStr }
+            val existingTemplateIds = storedOccs.map { it.templateId }.toSet()
+
+            val missingActiveToday = if (isToday) {
+                dailyTemplates.filter { it.isActive && it.startDate <= selectedDateStr && it.id !in existingTemplateIds }
+                    .map { tmpl ->
+                        DailyTaskGraphItem(
+                            occurrenceId = -(tmpl.id),
+                            templateId = tmpl.id,
+                            title = tmpl.title,
+                            color = tmpl.color,
+                            scheduledTimeMinutes = tmpl.scheduledTimeMinutes,
+                            status = OccurrenceStatus.PENDING
+                        )
+                    }
+            } else emptyList()
+
+            val storedItems = storedOccs.map { occ ->
+                val tmpl = templateMap[occ.templateId]
+                DailyTaskGraphItem(
+                    occurrenceId = occ.id,
+                    templateId = occ.templateId,
+                    title = occ.title,
+                    color = if (occ.color != 0) occ.color else (tmpl?.color ?: occ.color),
+                    scheduledTimeMinutes = occ.scheduledTimeMinutes,
+                    status = occ.status
+                )
+            }
+
+            (storedItems + missingActiveToday).sortedWith(compareBy({ it.scheduledTimeMinutes }, { it.occurrenceId }))
+        }
+
+        val completed = graphItems.count { it.status == OccurrenceStatus.COMPLETED }
+        val missed = graphItems.count { it.status == OccurrenceStatus.MISSED }
+        val skipped = graphItems.count { it.status == OccurrenceStatus.SKIPPED }
+        val pending = graphItems.count { it.status == OccurrenceStatus.PENDING }
+
+        val rate = if (isFuture) {
+            0f
+        } else {
+            val nonSkipped = graphItems.count { it.status != OccurrenceStatus.SKIPPED }
+            if (nonSkipped > 0) (completed.toFloat() / nonSkipped) * 100f else 0f
+        }
+
+        return DailyDateMetrics(
+            dateStr = selectedDateStr,
+            isToday = isToday,
+            isFuture = isFuture,
+            tasks = graphItems,
+            completedCount = completed,
+            missedCount = missed,
+            skippedCount = skipped,
+            pendingCount = pending,
+            completionRate = rate
+        )
+    }
+
+    fun calculateWeeklyTrend(
+        todayDateStr: String,
+        dailyOccurrences: List<TaskOccurrence>
+    ): List<DailyTrendDay> {
+        val result = mutableListOf<DailyTrendDay>()
+        val cal = Calendar.getInstance().apply {
+            time = runCatching { dateFormat.parse(todayDateStr) }.getOrNull() ?: Date()
+        }
+        val dayNames = arrayOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+        for (daysAgo in 6 downTo 0) {
+            val targetCal = Calendar.getInstance().apply {
+                time = cal.time
+                add(Calendar.DAY_OF_YEAR, -daysAgo)
+            }
+            val dateStr = dateFormat.format(targetCal.time)
+            val dayOfWeekIdx = targetCal.get(Calendar.DAY_OF_WEEK) - 1
+            val dayLabel = dayNames.getOrElse(dayOfWeekIdx) { "" }
+            val dayNumber = targetCal.get(Calendar.DAY_OF_MONTH).toString()
+
+            val occs = dailyOccurrences.filter { it.scheduledDate == dateStr }
+            val nonSkipped = occs.filter { it.status != OccurrenceStatus.SKIPPED }
+            val completed = nonSkipped.count { it.status == OccurrenceStatus.COMPLETED }
+            val rate = if (nonSkipped.isNotEmpty()) (completed.toFloat() / nonSkipped.size) * 100f else 0f
+
+            result.add(
+                DailyTrendDay(
+                    dateStr = dateStr,
+                    dayLabel = dayLabel,
+                    dayNumber = dayNumber,
+                    isToday = dateStr == todayDateStr,
+                    completedCount = completed,
+                    totalCount = nonSkipped.size,
+                    completionRate = rate
+                )
+            )
+        }
+        return result
+    }
+
+    fun calculateMonthlyTrend(
+        todayDateStr: String,
+        dailyOccurrences: List<TaskOccurrence>
+    ): MonthlyTrendSummary {
+        val monthPrefix = todayDateStr.substring(0, 7)
+        val cal = Calendar.getInstance().apply {
+            time = runCatching { dateFormat.parse(todayDateStr) }.getOrNull() ?: Date()
+        }
+        val monthFormat = SimpleDateFormat("MMMM yyyy", Locale.US)
+        val monthLabel = monthFormat.format(cal.time)
+
+        val monthOccs = dailyOccurrences.filter { it.scheduledDate.startsWith(monthPrefix) }
+        val nonSkipped = monthOccs.filter { it.status != OccurrenceStatus.SKIPPED }
+        val totalCompleted = nonSkipped.count { it.status == OccurrenceStatus.COMPLETED }
+        val totalEligible = nonSkipped.size
+        val rate = if (totalEligible > 0) (totalCompleted.toFloat() / totalEligible) * 100f else 0f
+
+        val buckets = mutableListOf<WeeklyBucket>()
+        val bucketRanges = listOf(
+            "Week 1" to (1..7),
+            "Week 2" to (8..14),
+            "Week 3" to (15..21),
+            "Week 4" to (22..31)
+        )
+
+        for ((label, range) in bucketRanges) {
+            val bucketOccs = nonSkipped.filter {
+                val dayOfMonth = it.scheduledDate.takeLast(2).toIntOrNull() ?: 0
+                dayOfMonth in range
+            }
+            val comp = bucketOccs.count { it.status == OccurrenceStatus.COMPLETED }
+            val total = bucketOccs.size
+            val bucketRate = if (total > 0) (comp.toFloat() / total) * 100f else 0f
+            buckets.add(WeeklyBucket(label = label, completed = comp, total = total, rate = bucketRate))
+        }
+
+        return MonthlyTrendSummary(
+            monthLabel = monthLabel,
+            totalCompleted = totalCompleted,
+            totalEligible = totalEligible,
+            completionRate = rate,
+            weeklyBuckets = buckets
+        )
+    }
+
+    fun calculateDailyTaskSummaries(
+        dailyTemplates: List<TaskTemplate>,
+        dailyOccurrences: List<TaskOccurrence>,
+        todayDateStr: String
+    ): List<DailyTaskStreakSummary> {
+        return dailyTemplates.filter { it.isActive }.map { template ->
+            val streak = calculateDailyTaskStreak(
+                template = template,
+                occurrencesForTemplate = dailyOccurrences.filter { it.templateId == template.id },
+                todayDateStr = todayDateStr
+            )
+            DailyTaskStreakSummary(
+                templateId = template.id,
+                title = template.title,
+                color = template.color,
+                currentStreak = streak.currentStreak,
+                longestStreak = streak.longestStreak,
+                totalCompleted = streak.totalCompleted,
+                totalDaysEligible = streak.totalDaysEligible
+            )
+        }.sortedWith(
+            compareByDescending<DailyTaskStreakSummary> { it.currentStreak }
+                .thenByDescending { it.longestStreak }
+                .thenBy { it.title.lowercase() }
+        )
+    }
+
+    fun calculateDailyInsights(
+        selectedDateStr: String,
+        todayDateStr: String,
+        allTemplates: List<TaskTemplate>,
+        allOccurrences: List<TaskOccurrence>
+    ): DailyInsightsData {
+        val dailyTemplates = allTemplates.filter { it.recurrenceType == RecurrenceType.DAILY }
+        val dailyOccurrences = filterDailyOccurrences(allOccurrences, allTemplates)
+
+        if (dailyTemplates.isEmpty()) {
+            return DailyInsightsData(
+                selectedDate = selectedDateStr,
+                selectedDateMetrics = DailyDateMetrics(selectedDateStr),
+                hasAnyDailyTasks = false
+            )
+        }
+
+        val selectedDateMetrics = calculateDailyDateMetrics(
+            selectedDateStr = selectedDateStr,
+            todayDateStr = todayDateStr,
+            dailyTemplates = dailyTemplates,
+            dailyOccurrences = dailyOccurrences
+        )
+
+        val weeklyTrend = calculateWeeklyTrend(todayDateStr, dailyOccurrences)
+        val monthlyTrend = calculateMonthlyTrend(todayDateStr, dailyOccurrences)
+
+        val todayOccs = dailyOccurrences.filter { it.scheduledDate == todayDateStr }
+        val todayComp = todayOccs.count { it.status == OccurrenceStatus.COMPLETED }
+        val todayNonSkipped = todayOccs.count { it.status != OccurrenceStatus.SKIPPED }
+        val todayRate = if (todayNonSkipped > 0) (todayComp.toFloat() / todayNonSkipped) * 100f else 0f
+
+        val totalCompletedAllTime = dailyOccurrences.count { it.status == OccurrenceStatus.COMPLETED }
+
+        val dailyStreaks = calculateDailyTaskSummaries(dailyTemplates, dailyOccurrences, todayDateStr)
+        val bestCurrentStreak = dailyStreaks.maxOfOrNull { it.currentStreak } ?: 0
+        val bestCurrentStreakTaskTitle = dailyStreaks.firstOrNull { it.currentStreak == bestCurrentStreak && it.currentStreak > 0 }?.title
+        val longestStreakAllTime = dailyStreaks.maxOfOrNull { it.longestStreak } ?: 0
+        val longestStreakTaskTitle = dailyStreaks.firstOrNull { it.longestStreak == longestStreakAllTime && it.longestStreak > 0 }?.title
+
+        val templateMap = dailyTemplates.associateBy { it.id }
+        val byTemplate = dailyOccurrences.groupBy { it.templateId }
+
+        var mostConsistentTitle: String? = null
+        var mostConsistentColor: Int? = null
+        var highestRate = -1f
+
+        var mostMissedTitle: String? = null
+        var mostMissedColor: Int? = null
+        var highestMissedCount = 0
+
+        for ((tmplId, occs) in byTemplate) {
+            val tmpl = templateMap[tmplId] ?: continue
+            val nonSkipped = occs.filter { it.status != OccurrenceStatus.SKIPPED }
+            if (nonSkipped.isNotEmpty()) {
+                val comp = nonSkipped.count { it.status == OccurrenceStatus.COMPLETED }
+                val r = comp.toFloat() / nonSkipped.size
+                if (r > highestRate && comp >= 1) {
+                    highestRate = r
+                    mostConsistentTitle = tmpl.title
+                    mostConsistentColor = tmpl.color
+                }
+            }
+            val missed = occs.count { it.status == OccurrenceStatus.MISSED }
+            if (missed > highestMissedCount) {
+                highestMissedCount = missed
+                mostMissedTitle = tmpl.title
+                mostMissedColor = tmpl.color
+            }
+        }
+
+        return DailyInsightsData(
+            selectedDate = selectedDateStr,
+            selectedDateMetrics = selectedDateMetrics,
+            weeklyTrend = weeklyTrend,
+            monthlyTrend = monthlyTrend,
+            todayCompletionRate = todayRate,
+            todayCompletedCount = todayComp,
+            todayTotalCount = todayNonSkipped,
+            totalCompletedAllTime = totalCompletedAllTime,
+            bestCurrentStreak = bestCurrentStreak,
+            bestCurrentStreakTaskTitle = bestCurrentStreakTaskTitle,
+            longestStreakAllTime = longestStreakAllTime,
+            longestStreakTaskTitle = longestStreakTaskTitle,
+            mostConsistentTaskTitle = mostConsistentTitle,
+            mostConsistentTaskColor = mostConsistentColor,
+            mostConsistentTaskRate = if (highestRate >= 0f) highestRate * 100f else null,
+            mostFrequentMissedTaskTitle = mostMissedTitle,
+            mostFrequentMissedTaskColor = mostMissedColor,
+            mostFrequentMissedCount = if (highestMissedCount > 0) highestMissedCount else null,
+            dailyStreaks = dailyStreaks,
+            hasAnyDailyTasks = true
+        )
     }
 
     private fun getDateDaysAgo(dateStr: String, daysAgo: Int): String {
